@@ -11,7 +11,7 @@ namespace Basip
         public string db_config { get; set; }
         public string timestart { get; set; }
         public string timeout { get; set; }
-        public bool run_now { get; set; }
+        public bool run_now  { get; set; }
         public int time_wait_http { get; set; }
     }
 }

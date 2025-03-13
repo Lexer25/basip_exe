@@ -57,38 +57,103 @@ namespace Basip
             List<Task> tasks = new List<Task>();
             Stopwatch stopwatch = Stopwatch.StartNew();
             //запуск 
-            DataRowCollection data = db.GetDevice().Rows;
+            DataRowCollection data = db.GetDevice().Rows;//получить список панелей, сразу с логинами и паролями
             con.Close();
             foreach (DataRow row in data)
-               tasks.Add(TaskGet(row));//async
-                //TaskGet(new Device(row), db).Wait();//sync
+                tasks.Add(TaskGet(row));//async Начинаю асинхронные процессы
+                //TaskGet(new Device(row), db).Wait();//not sync
             logger.LogDebug("device: "+data.Count);
             Task.WaitAll(tasks.ToArray());
             logger.LogDebug("time: "+stopwatch.ElapsedMilliseconds);
         }
-        private async Task TaskGet(DataRow row)
+
+        /* 12.03.2025 
+         * Освной процесс работы с панелью
+         * 
+         * 
+         */
+        private async Task TaskGet(DataRow row)// в row содержатся логин, пароль, id_dev, IP адрес
         {
             DB db = new DB();
             FbConnection con = db.DBconnect(options.db_config);
             con.Open();
             Device dev =new Device(row);
 
-            //   logger.LogDebug(dev.id_dev+"");
-            // await Task.Delay(1000);
-            //db.GetDevice();
-            DeviceInfo deviceInfo= await dev.GetInfo(options.time_wait_http);
-            if (deviceInfo == null)
+            DeviceInfo deviceInfo= await dev.GetInfo(options.time_wait_http);//нужна ли тут сущность DeviceInfo? может, это включить в класс Device?
+            if (dev.is_online)// связи с панелью нет
             {
-                logger.LogDebug($@"No connect: id: {dev.id_dev} ip: {dev.ip}");
-                db.saveParam(dev.id_dev, "ABOUT", null, "no connect");
-                db.saveParam(dev.id_dev, "ONLINE", 0, null);
+                logger.LogDebug($@"No connect: id: {row["id_dev"]} ip: {dev.ip}");
+                //db.saveParam((int)row["id_dev"], "ABOUT", null, "no connect");
+                db.saveParam((int)row["id_dev"], "ONLINE", 0, null);//зафиксировать отсутствие связи с панелью.
+                db.updateCaridxErrAll((int)row["id_dev"], "Нет связи с устройством");//поставить отметку для всех карт этой панели
+                return; 
             }
-            else
+            else //связь с панелью есть
             {
+                //начинаю обработку карт для записи
                 string data = $@"{deviceInfo.device_model} , {deviceInfo.firmware_version} , {deviceInfo.firmware_version} , {deviceInfo.api_version}";
-                logger.LogDebug(dev.id_dev+" | "+data);
-                db.saveParam(dev.id_dev, "ABOUT", null, data);
-                db.saveParam(dev.id_dev, "ONLINE", 1, null);
+                logger.LogDebug((int)row["id_dev"] +" | "+data);
+                db.saveParam((int)row["id_dev"], "ABOUT", null, data);//фиксирую информацию о панели.
+                db.saveParam((int)row["id_dev"], "ONLINE", 1, null);//фиксирую наличие связи
+                //провожу авторизацию
+                
+                if(dev.Auth(dev.password))
+                {
+                    //проверка очереди на запись карт
+                    DataRowCollection cardList = db.GetCardForLoad((int)row["id_dev"]);//получить список карт для панели
+                    if (cardList.Count>0)//если карт есть, то начинаем работу с картами
+                    {
+                        //запись идентификаторов в вызывную панель
+                        foreach(DataRow card in cardList)
+                        {
+                            //
+                            if(card.attempt == 1)//запись идентификатора в панель
+                            {
+                                if(dev.writekey(card.id))//если запись прошла успешно, то 
+                                {
+                                    db.delFromCardindev((int)row["id_dev"], card.id);//удалить карту из очереди загрузки
+                                    db.updateCaridxOk((int)row["id_dev"], card.id);//записать в таблицу cardidx дату и время успешной записи
+
+                                } else
+                                {
+                                    string mess = "Причина неудачной записи.";
+                                    db.incrementCardindev((int)row["id_dev"], card.id);//количество попыток увеличть на 1.
+                                    db.updateCaridxErr((int)row["id_dev"], card.id, mess);//зафиксировать неуспешную попытку записи.
+
+                                }
+
+                            }
+                            if(card.attempt == 2)//удаление идентификатор из панели
+                            {
+                                db.delFromCardindev((int)row["id_dev"], card.id);//удалить карту из таблицы cardindev
+                                //с таблицей cardidx работа не ведется, т.к. там информации о картах уже нет
+                                
+                            } else
+                            {
+                                db.incrementCardindev((int)row["id_dev"], card.id);
+                                //с таблицей cardidx работа не ведется, т.к. там информации о картах уже нет
+                            }
+
+                        }
+
+                    } else
+                    {
+                        //нет очереди. возможно, это надо зафиксировать в лог-файле.
+                    }
+
+                    //сбор событий
+                    /*
+                     * тут надо организовать цикл выбора событий из панели и запись событий в БД СКУД.
+                     * 
+                     * 
+                     */
+                } else //авторизация прошла неуспешно
+                {
+                    //сохранить в лог запись о неудачной авторизации.
+                    db.updateCaridxErrAll((int)row["id_dev"], card.id, "Ошибка авторизации.");//поставить отметку для всех карт этой панели
+
+                }
+
             }
             con.Close();
             //  Thread.Sleep(1000);
