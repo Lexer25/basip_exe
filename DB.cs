@@ -38,7 +38,10 @@ namespace Basip
         //12.03.2025 Получить список панелей
         public DataTable GetCardForLoad(int id_dev)
         {
-            string sql = $@"";
+            string sql = $@"select cd.id_cardindev, cd.id_card, cd.id_dev,cd.operation from cardindev cd
+            join device d on d.id_dev=cd.id_dev
+            join device d2 on d2.id_ctrl=d.id_ctrl and d2.id_reader is null
+            where d2.id_dev={id_dev}";
 
             FbCommand getcomand = new FbCommand(sql, con);
 
@@ -65,6 +68,7 @@ namespace Basip
          * @input messErr - сообщение, которое надо вписать в load_result
          * 
          */
+        /*
         public void updateCaridxErrAll(int id_dev, string messErr) {
 
             string sql = $@"delete from bas_param bp where bp.id_dev={id_dev} and bp.param='{param_name}'";
@@ -74,7 +78,7 @@ namespace Basip
             sql = $@"INSERT INTO BAS_PARAM (ID_DEV, PARAM, INTVALUE, STRVALUE) VALUES ({id_dev},'{param_name}',{data_int_},'{data_string}')";
             getcomand = new FbCommand(sql, con);
             getcomand.ExecuteNonQuery();
-        }
+        }*/
 
 
 

@@ -6,42 +6,50 @@ using System.Linq;
 using System.Net;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 
 namespace Basip
 {
-    class Device
+    public class Device
     {
-        public IPAddress ip { get; set; }
-       // public int id_dev { get; set; }
-       // public string id_ctrl {  get; set; }
-        public string base_url { get; set; }
-        public string login { get; set; }
-        public string password { get; set; }
-        private string hashPassword { get; set; }
-        public bool is_online { get; set; } // признак связи: true - усптройство на связи, false - прибор не отвечает
-        
-        public Device(DataRow row)
+        public IPAddress ip;
+        // public int id_dev { get; set; }
+        // public string id_ctrl {  get; set; }
+        public string base_url;
+        public string login;
+        public string password;
+        public string token;
+        private string hashPassword;//2644256 admin
+        public bool is_online; // признак связи: true - усптройство на связи, false - прибор не отвечает
+        public string base_url_api;
+        public int time_wait;
+        public Device(DataRow row,int time_wait)
         {
             try {
                 byte[] ip_byte = BitConverter.GetBytes((int)row["ip"]);
                 Array.Reverse(ip_byte);
                 ip = new IPAddress(ip_byte);
                 base_url = "http://" + ip.ToString()+":80";
-                // base_url = "http://192.168.8.102:8888"; 
+                base_url_api = "/api/v1";
                 //       id_dev = (int)row["id_dev"];
                 //       id_ctrl = row["id_ctrl"].ToString();
                 login = row["login"].ToString();
-                password = row["password"].ToString();
+                password = CreateMD5(row["password"].ToString());
+                time_wait = time_wait;
             }
             catch(Exception e)
             {
                 
             }
         }
+        public Device() {  
+            base_url_api = "/api/v1";
+        }
         
         //получить информацию об устройстве без авторизации.
-        public async Task<DeviceInfo> GetInfo(int time_wait) 
+        public async Task<JsonDocument> GetInfo() 
         {
             string uri = "api/info";
             RestClient restClient=new RestClient(new RestClientOptions { Timeout = TimeSpan.FromSeconds(time_wait), BaseUrl=new Uri(base_url) });
@@ -53,15 +61,85 @@ namespace Basip
 
             }
             this.is_online = true;
-            return JsonSerializer.Deserialize<DeviceInfo>(get.Content);
+            return JsonDocument.Parse(get.Content);
         }
 
         //попытка авторизации
-        public bool Auth(string pswd) 
+        public async Task<bool> Auth()
         {
-            int a = await 1 + 1;   
-        }
+            RestClient restClient = new RestClient(new RestClientOptions { Timeout = TimeSpan.FromSeconds(time_wait), BaseUrl = new Uri(base_url+base_url_api) });
+            var request = new RestRequest($@"/login?username={login}&password={password}");
+            request.AddHeader("Accept", "application/json");
+            request.AddHeader("Content-Type", "application/json");
+            var get = await restClient.ExecuteGetAsync(request);
+            if (get == null || get.Content == null)
+            {
+                this.is_online = false;
+                return false;
+            }
+            try
+            {
+                token = JsonDocument.Parse(get.Content).RootElement.GetProperty("token").ToString();
 
+            }
+            catch (Exception ex)
+            {
+                return false;
+            }
+            this.is_online = true;
+
+            return true;
+        }
+        public async Task<RestResponse> DeleteCard(string uid) 
+        {
+            RestClient restClient = new RestClient(new RestClientOptions { Timeout = TimeSpan.FromSeconds(time_wait), BaseUrl = new Uri(base_url + base_url_api) });
+            var request = new RestRequest($@"access/identifier/item/{uid}");
+            request.AddHeader("Accept", "application/json");
+            request.AddHeader("Content-Type", "application/json");
+            request.AddHeader("Authorization", "Bearer " + token);
+            RestResponse get = await restClient.ExecuteDeleteAsync(request);
+            return get;
+        }
+        public async Task<RestResponse> AddCard(string card) {
+            RestClient restClient = new RestClient(new RestClientOptions { Timeout = TimeSpan.FromSeconds(time_wait), BaseUrl = new Uri(base_url + base_url_api) });
+            var cardjson = new JsonObject()
+            {
+                ["identifier_owner"] = new JsonObject()
+                {
+                    ["name"] = card,
+                    ["type"] = "owner"
+                },
+                ["identifier_type"] = "card",
+                ["identifier_number"] = Convert.ToInt64(card),
+                ["lock"] = "all"
+            };
+            var request=new RestRequest("access/identifier");
+            request.AddBody(cardjson);  //1673
+            request.AddHeader("Accept", "application/json");
+            request.AddHeader("Content-Type", "application/json");
+            request.AddHeader("Authorization", "Bearer " + token);
+            return await restClient.ExecutePostAsync(request);
+        }
+        public async Task<RestResponse> GetInfoUID(int uid)
+        {
+            RestClient restClient = new RestClient(new RestClientOptions { Timeout = TimeSpan.FromSeconds(time_wait), BaseUrl = new Uri(base_url + base_url_api) });
+            var request = new RestRequest("access/identifier/item/"+uid);
+            request.AddHeader("Accept", "application/json");
+            request.AddHeader("Content-Type", "application/json");
+            request.AddHeader("Authorization", "Bearer " + token);
+            RestResponse get = await restClient.ExecuteGetAsync(request);
+            return get;
+        }
+        public async Task<RestResponse> GetInfoCard(string name)
+        {
+            RestClient restClient = new RestClient(new RestClientOptions { Timeout = TimeSpan.FromSeconds(time_wait), BaseUrl = new Uri(base_url + base_url_api) });
+            var request = new RestRequest("access/identifier/items?filter_field=identifier_number&filter_type=equal&filter_format=string&filter_value=" + name);
+            request.AddHeader("Accept", "application/json");
+            request.AddHeader("Content-Type", "application/json");
+            request.AddHeader("Authorization", "Bearer " + token);
+            RestResponse get = await restClient.ExecuteGetAsync(request);
+            return get;
+        }
         //сделать хэш пароля
         // https://stackoverflow.com/questions/11454004/calculate-a-md5-hash-from-a-string
         public static string CreateMD5(string input)
