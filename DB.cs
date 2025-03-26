@@ -62,6 +62,25 @@ namespace Basip
             getcomand = new FbCommand(sql, con);
             getcomand.ExecuteNonQuery();
         }
+        public void DeleteCardInDev(int id_cardindev)
+        {
+            FbCommand getcomand = new FbCommand($@"delete from cardindev cd
+            where cd.id_cardindev ={id_cardindev}", con);
+            //cdx.id_cardindev=null
+            var reader = getcomand.ExecuteReader();
+            DataTable table = new DataTable();
+            table.Load(reader);
+        }
+        public void UpdateCardInDevIncrement(int id_cardindev)
+        {
+            FbCommand getcomand = new FbCommand($@"update cardindev cd
+            set cd.attempts=cd.attempts+1
+            where cd.id_cardindev={id_cardindev}", con);
+            //cdx.id_cardindev=null
+            var reader = getcomand.ExecuteReader();
+            DataTable table = new DataTable();
+            table.Load(reader);
+        }
 
         /* 12.03.2025 для всех карт для указанной панели добавить load_result как ошибка.
          * @input id_dev - id панели
