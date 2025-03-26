@@ -110,31 +110,31 @@ namespace Basip
                 switch ((int)card["operation"])
                 {
                     case 1:
-                        logger.LogDebug($@"Command destination: writekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} key={card["id_card"]} key=""{card["id_card"]}"" AddCard ");
-                        RestResponse request = await dev.AddCard(card["id_card"].ToString());
+                        logger.LogDebug($@"Command destination: writekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} key=""{options.uidtransform(card["id_card"].ToString())}"" AddCard ");
+                        RestResponse request = await dev.AddCard(options.uidtransform(card["id_card"].ToString()));
                         switch (request.StatusCode)
                         {
                             case HttpStatusCode.OK:
                                 var uid = JsonDocument.Parse(request.Content).RootElement.GetProperty("uid");
-                                logger.LogDebug($@"Answer destination: writekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: OK key=""{card["id_card"]}"" uid={uid}");
+                                logger.LogDebug($@"Answer destination: writekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: OK key=""{options.uidtransform(card["id_card"].ToString())}"" uid={uid}");
                                 logger.LogTrace($@"Query BASE_URL {dev.base_url} Answer: {request.StatusCode} {request.Content}");
                                 db.DeleteCardInDev((int)card["id_cardindev"]);
                                 break;
                             case HttpStatusCode.BadRequest:
-                                logger.LogDebug($@"Answer destination: writekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: OK key=""{card["id_card"]}"" card alredy exist card id");
+                                logger.LogDebug($@"Answer destination: writekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: OK key=""{options.uidtransform(card["id_card"].ToString())}"" card alredy exist card id");
                                 logger.LogTrace($@"Query BASE_URL {dev.base_url} Answer: {request.StatusCode} {request.Content}");
                                 db.DeleteCardInDev((int)card["id_cardindev"]);
                                 break;
                             default:
-                                logger.LogError($@"Answer destination: writekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: ERR key=""{card["id_card"]}"" add card write false status");
+                                logger.LogError($@"Answer destination: writekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: ERR key=""{options.uidtransform(card["id_card"].ToString())}"" add card write false status");
                                 logger.LogTrace($@"Query BASE_URL {dev.base_url} Answer: {request.StatusCode} {request.Content}");
                                 db.UpdateCardInDevIncrement((int)card["id_cardindev"]);
                                 break;
                         }
                         break;
                     case 2:
-                        logger.LogDebug($@"Command destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} key={card["id_card"]}  key=""{card["id_card"]}"" GetInfoCard {deviceInfo.RootElement.GetProperty("api_version").ToString()}");
-                        RestResponse? content = await dev.GetInfoCard(card["id_card"].ToString(), int.Parse(deviceInfo.RootElement.GetProperty("api_version").ToString().Split('.')[0]));//получаем информацию о карте
+                        logger.LogDebug($@"Command destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} key=""{options.uidtransform(card["id_card"].ToString())}"" GetInfoCard {deviceInfo.RootElement.GetProperty("api_version").ToString()}");
+                        RestResponse? content = await dev.GetInfoCard(options.uidtransform(card["id_card"].ToString()), int.Parse(deviceInfo.RootElement.GetProperty("api_version").ToString().Split('.')[0]));//получаем информацию о карте
                         switch (content.StatusCode)
                         {
                             case HttpStatusCode.OK:
@@ -142,17 +142,17 @@ namespace Basip
                                 foreach (JsonElement element in jsonlist)
                                 {
                                     string uid_card = element.GetProperty("identifier_uid").ToString();
-                                    logger.LogDebug($@"Command destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} key=""{card["id_card"]}"" uid={uid_card} DeleteCard ");
+                                    logger.LogDebug($@"Command destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} key=""{options.uidtransform(card["id_card"].ToString())}"" uid={uid_card} DeleteCard ");
                                     var status = (await dev.DeleteCard(uid_card)).StatusCode;//удаление карты
                                     switch (status)
                                     {
                                         case HttpStatusCode.OK:
-                                            logger.LogDebug($@"Answer destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: OK key=""{card["id_card"]}"" uid={uid_card}");
+                                            logger.LogDebug($@"Answer destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: OK key=""{options.uidtransform(card["id_card"].ToString())}"" uid={uid_card}");
                                             logger.LogTrace($@"Query BASE_URL {dev.base_url} Answer: {content.StatusCode} {content.Content}");
                                             db.DeleteCardInDev((int)card["id_cardindev"]);
                                             break;
                                         default:
-                                            logger.LogDebug($@"Answer destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: ERR key=""{card["id_card"]}"" uid={uid_card} no delete");
+                                            logger.LogDebug($@"Answer destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: ERR key=""{options.uidtransform(card["id_card"].ToString())}"" uid={uid_card} no delete");
                                             logger.LogTrace($@"Query BASE_URL {dev.base_url} Answer: {content.StatusCode} {content.Content}");
                                             db.UpdateCardInDevIncrement((int)card["id_cardindev"]);
                                             break;
@@ -160,13 +160,13 @@ namespace Basip
                                 }
                                 if (jsonlist.Count() == 0)
                                 {
-                                    logger.LogDebug($@"Answer destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: OK key=""{card["id_card"]}"" OK no card in panael");
+                                    logger.LogDebug($@"Answer destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: OK key=""{options.uidtransform(card["id_card"].ToString())}"" no card in panael");
                                     logger.LogTrace($@"Query BASE_URL {dev.base_url} Answer: {content.StatusCode} {content.Content}");
                                     db.DeleteCardInDev((int)card["id_cardindev"]);
                                 }
                                 break;
                             default:
-                                logger.LogError($@"Answer destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: ERR key=""{card["id_card"]}"" faild GetInfoCard (не удалось получить информацию о карте)");
+                                logger.LogError($@"Answer destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: ERR key=""{options.uidtransform(card["id_card"].ToString())}"" faild GetInfoCard (не удалось получить информацию о карте)");
                                 logger.LogTrace($@"Query BASE_URL {dev.base_url} Answer: {content.StatusCode} {content.Content}");
                                 db.UpdateCardInDevIncrement((int)card["id_cardindev"]);
                                 break;
