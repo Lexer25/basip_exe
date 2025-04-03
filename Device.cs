@@ -15,8 +15,6 @@ namespace Basip
     public class Device
     {
         public IPAddress ip;
-        // public int id_dev { get; set; }
-        // public string id_ctrl {  get; set; }
         public string base_url;
         public string login;
         public string password;
@@ -25,6 +23,8 @@ namespace Basip
         public bool is_online; // признак связи: true - усптройство на связи, false - прибор не отвечает
         public string base_url_api;
         public int time_wait=10;
+        
+        
         public Device(DataRow row,int time_wait)
         {
            

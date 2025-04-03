@@ -29,14 +29,22 @@ namespace Basip
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            logger.LogTrace(@$"time run basip: {timestart} deltasleep: {deltasleep}");
+            // System.Reflection.Assembly executingAssembly = System.Reflection.Assembly.GetExecutingAssembly();
+            //var fieVersionInfo = FileVersionInfo.GetVersionInfo(executingAssembly.Location);
+            //var version = fieVersionInfo.FileVersion;
+
+
+            //logger.LogTrace(@$"32 basip start: {timestart} deltasleep: {deltasleep} fieVersionInfo = {fieVersionInfo} version = {version}");
+            
+            logger.LogTrace(@$"32 basip start: {timestart} deltasleep: {deltasleep}");
+            logger.LogTrace(@$"33 Service basip write and delete card started");
             await Task.Delay(deltasleep);
             while (!stoppingToken.IsCancellationRequested)
             {
                 logger.LogTrace($@"Старт итерации");
                 try
                 {
-                    run();
+                    run();//запуск модуля, который запустит асинхронные процессы.
                 }
                 catch (Exception ex) {
                     logger.LogError("Something crash restart everything");
@@ -44,8 +52,9 @@ namespace Basip
                     continue;
                 }
                 logger.LogTrace($@"timeout basip: {timeout}");
-                await Task.Delay(timeout, stoppingToken);
+                await Task.Delay(timeout, stoppingToken);// пауза на указанное в настройках время.
             }
+            logger.LogTrace(@$"49 basip stop");
         }
         private void run()
         {
@@ -65,13 +74,18 @@ namespace Basip
             Stopwatch stopwatch = Stopwatch.StartNew();
             //запуск 
             DataRowCollection data = db.GetDevice().Rows;//получить список панелей, сразу с логинами и паролями
-            con.Close();
-            
+            con.Close();// закрываю подключение, чтобы не плодить коннекты.
+            logger.LogDebug("71 Зарегистрировано панелей bas-ip: "+data.Count+" шт.");
+            logger.LogTrace("70 Start async.");
             foreach (DataRow row in data)
-                tasks.Add(TaskGet(row));//async Начинаю асинхронные процессы
+            {
+             
+                tasks.Add(TaskGet(row));//async Начинаю асинхронные процессы. Процесс TaskGet - основной процесс, который записывае и удаляет карты
+
+            }
                 //TaskGet(new Device(row), db).Wait();//not sync
-            logger.LogDebug("device: "+data.Count);
-            Task.WaitAll(tasks.ToArray());
+            
+            Task.WaitAll(tasks.ToArray());//жду пока все процессы завершатся.
             logger.LogDebug("time: "+stopwatch.ElapsedMilliseconds);
         }
 
@@ -88,7 +102,7 @@ namespace Basip
             Device dev =new Device(row,options.time_wait_http);
            // dev.base_url = "http://192.168.8.102:8888";
 
-            JsonDocument deviceInfo= await dev.GetInfo();//нужна ли тут сущность DeviceInfo? может, это включить в класс Device?
+            JsonDocument deviceInfo= await dev.GetInfo();//получили документ со свойствами панели bas-ip, с которой будем работать.
             if (!dev.is_online)// связи с панелью нет
             {
                 logger.LogDebug($@"device {dev.base_url} ofline");
@@ -96,14 +110,15 @@ namespace Basip
             }
             if (!await dev.Auth())
             {
-                logger.LogDebug($@"faild auth {dev.base_url}");
+                logger.LogDebug($@"106 Ошибка авторизации для панели IP= {dev.base_url}");
                 return;
             }
 
+            //если панель на связи, то продолжаю работу.
             DB db = new DB();
             FbConnection con = db.DBconnect(options.db_config);
             con.Open();
-            DataRowCollection cardList = db.GetCardForLoad((int)row["id_dev"]).Rows;//получить список карт для панели
+            DataRowCollection cardList = db.GetCardForLoad((int)row["id_dev"]).Rows;//получить список записи и удаления карт для панели
             logger.LogTrace("Card count: " + cardList.Count);
             foreach (DataRow card in cardList)
             {
@@ -117,140 +132,86 @@ namespace Basip
                             case HttpStatusCode.OK:
                                 var uid = JsonDocument.Parse(request.Content).RootElement.GetProperty("uid");
                                 logger.LogDebug($@"Answer destination: writekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: OK key=""{options.uidtransform(card["id_card"].ToString())}"" uid={uid}");
-                                logger.LogTrace($@"Query BASE_URL {dev.base_url} Answer: {request.StatusCode} {request.Content}");
+                                logger.LogTrace($@"121 Query writekey id_dev={row["id_dev"]} key=""{options.uidtransform(card["id_card"].ToString())}"" BASE_URL {dev.base_url} Answer: {request.StatusCode} {request.Content}");
                                 db.DeleteCardInDev((int)card["id_cardindev"]);
                                 break;
                             case HttpStatusCode.BadRequest:
                                 logger.LogDebug($@"Answer destination: writekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: OK key=""{options.uidtransform(card["id_card"].ToString())}"" card alredy exist card id");
-                                logger.LogTrace($@"Query BASE_URL {dev.base_url} Answer: {request.StatusCode} {request.Content}");
+                                logger.LogTrace($@"126 Query writekey id_dev={row["id_dev"]} key=""{options.uidtransform(card["id_card"].ToString())}"" BASE_URL {dev.base_url} Answer: {request.StatusCode} {request.Content}");
                                 db.DeleteCardInDev((int)card["id_cardindev"]);
                                 break;
                             default:
                                 logger.LogError($@"Answer destination: writekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: ERR key=""{options.uidtransform(card["id_card"].ToString())}"" add card write false status");
-                                logger.LogTrace($@"Query BASE_URL {dev.base_url} Answer: {request.StatusCode} {request.Content}");
+                                logger.LogTrace($@"131 Query writekey id_dev={row["id_dev"]} key=""{options.uidtransform(card["id_card"].ToString())}"" BASE_URL {dev.base_url} Answer: {request.StatusCode} {request.Content}");
                                 db.UpdateCardInDevIncrement((int)card["id_cardindev"]);
                                 break;
                         }
                         break;
-                    case 2:
-                        logger.LogDebug($@"Command destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} key=""{options.uidtransform(card["id_card"].ToString())}"" GetInfoCard {deviceInfo.RootElement.GetProperty("api_version").ToString()}");
+                    case 2:// обработка команды на удаление номера из панели bas-ip
+                           //tring delcommand = "deletekey id_dev =" + row["id_dev"] + " BASE_URL " + dev.base_url + " key = """ + options.uidtransform(card["id_card"].ToString()) + """";
+
+                        //готовлю строку delcommandlog для удобства вести лог.
+                        string delcommandlog = $@"deletekey id_dev ={ row["id_dev"]} BASE_URL { dev.base_url} key = ""{ options.uidtransform(card["id_card"].ToString())}""";
+
+                        // logger.LogDebug($@"Command destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} key=""{options.uidtransform(card["id_card"].ToString())}"" GetInfoCard api_version=""{deviceInfo.RootElement.GetProperty("api_version").ToString()}""");
+                        
+                        logger.LogDebug(delcommandlog + "GetInfoCard " + "api_version=\"" + deviceInfo.RootElement.GetProperty("api_version").ToString() + "\"");
+                        
+                        //запрашиваю у панели информацию о карте (т.к. для удаления надо указать UID)
+                        //при запросе учитываю версию API
                         RestResponse? content = await dev.GetInfoCard(options.uidtransform(card["id_card"].ToString()), int.Parse(deviceInfo.RootElement.GetProperty("api_version").ToString().Split('.')[0]));//получаем информацию о карте
                         switch (content.StatusCode)
                         {
-                            case HttpStatusCode.OK:
+                            case HttpStatusCode.OK:// если статус ОК, то ответ получил, и начинаю разбор ответа
                                 JsonElement.ArrayEnumerator jsonlist = JsonDocument.Parse(content.Content).RootElement.GetProperty("list_items").EnumerateArray();//ищем uid карты
+                                
                                 foreach (JsonElement element in jsonlist)
                                 {
+                                    
+                                    //извлекаю UID карты
                                     string uid_card = element.GetProperty("identifier_uid").ToString();
-                                    logger.LogDebug($@"Command destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} key=""{options.uidtransform(card["id_card"].ToString())}"" uid={uid_card} DeleteCard ");
+                                   
+                                    
+                                   // logger.LogDebug($@"Command destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} key=""{options.uidtransform(card["id_card"].ToString())}"" uid={uid_card} DeleteCard ");
+                                    logger.LogDebug(delcommandlog + $@" uid ={uid_card} DeleteCard ");
                                     var status = (await dev.DeleteCard(uid_card)).StatusCode;//удаление карты
                                     switch (status)
                                     {
                                         case HttpStatusCode.OK:
-                                            logger.LogDebug($@"Answer destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: OK key=""{options.uidtransform(card["id_card"].ToString())}"" uid={uid_card}");
-                                            logger.LogTrace($@"Query BASE_URL {dev.base_url} Answer: {content.StatusCode} {content.Content}");
+                                            logger.LogDebug($@"{delcommandlog}   Answer: OK uid={uid_card}");
+                                            logger.LogTrace($@"152 Query {delcommandlog}  Answer: OK uid={uid_card} {content.StatusCode} {content.Content}");
                                             db.DeleteCardInDev((int)card["id_cardindev"]);
                                             break;
                                         default:
-                                            logger.LogDebug($@"Answer destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: ERR key=""{options.uidtransform(card["id_card"].ToString())}"" uid={uid_card} no delete");
-                                            logger.LogTrace($@"Query BASE_URL {dev.base_url} Answer: {content.StatusCode} {content.Content}");
+                                            logger.LogDebug($@"Answer destination: {delcommandlog} Answer: ERR uid={uid_card} no delete");
+                                            logger.LogTrace($@"157 Query {delcommandlog}  Answer: ERR {content.StatusCode} {content.Content}");
                                             db.UpdateCardInDevIncrement((int)card["id_cardindev"]);
                                             break;
                                     }
                                 }
-                                if (jsonlist.Count() == 0)
+                                if (jsonlist.Count() == 0)// если ничего не пришло в ответ - значит, и карты в панели нет, что и требуется.
                                 {
-                                    logger.LogDebug($@"Answer destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: OK key=""{options.uidtransform(card["id_card"].ToString())}"" no card in panael");
-                                    logger.LogTrace($@"Query BASE_URL {dev.base_url} Answer: {content.StatusCode} {content.Content}");
+                                    logger.LogDebug($@"{delcommandlog} Answer: OK no card in panael");
+                                    logger.LogTrace($@"Query  {delcommandlog} Answer: {content.StatusCode} {content.Content}");
                                     db.DeleteCardInDev((int)card["id_cardindev"]);
                                 }
-                                break;
+                            break;
                             default:
-                                logger.LogError($@"Answer destination: deletekey id_dev={row["id_dev"]} BASE_URL {dev.base_url} Answer: ERR key=""{options.uidtransform(card["id_card"].ToString())}"" faild GetInfoCard (не удалось получить информацию о карте)");
-                                logger.LogTrace($@"Query BASE_URL {dev.base_url} Answer: {content.StatusCode} {content.Content}");
-                                db.UpdateCardInDevIncrement((int)card["id_cardindev"]);
-                                break;
+                                logger.LogError($@"{delcommandlog} Answer: ERR faild GetInfoCard (не удалось получить информацию о карте)");
+                                logger.LogTrace($@"Query {delcommandlog} Answer: {content.StatusCode} {content.Content}");
+                                db.UpdateCardInDevIncrement((int)card["id_cardindev"]);// удаление не удалось. Делаю инкремент попыток
+                            break;
                         }
                         break;
                 }
 
             }
             con.Close();    
-            //db.saveParam((int)row["id_dev"], "ABOUT", null, "no connect");
-            // db.saveParam((int)row["id_dev"], "ONLINE", 0, null);//зафиксировать отсутствие связи с панелью.
-            //   db.updateCaridxErrAll((int)row["id_dev"], "Нет связи с устройством");//поставить отметку для всех карт этой панели     
+            
 
 
         }
-        /*  else //связь с панелью есть
-          {
-              //начинаю обработку карт для записи
-              string data = $@"{deviceInfo.device_model} , {deviceInfo.firmware_version} , {deviceInfo.firmware_version} , {deviceInfo.api_version}";
-              logger.LogDebug((int)row["id_dev"] +" | "+data);
-              db.saveParam((int)row["id_dev"], "ABOUT", null, data);//фиксирую информацию о панели.
-              db.saveParam((int)row["id_dev"], "ONLINE", 1, null);//фиксирую наличие связи
-              //провожу авторизацию
-
-              if(dev.Auth(dev.password))
-              {
-                  //проверка очереди на запись карт
-
-                  if (cardList.Count>0)//если карт есть, то начинаем работу с картами
-                  {
-                      //запись идентификаторов в вызывную панель
-                      foreach(DataRow card in cardList)
-                      {
-                          //
-                          if(card.attempt == 1)//запись идентификатора в панель
-                          {
-                              if(dev.writekey(card.id))//если запись прошла успешно, то 
-                              {
-                                  db.delFromCardindev((int)row["id_dev"], card.id);//удалить карту из очереди загрузки
-                                  db.updateCaridxOk((int)row["id_dev"], card.id);//записать в таблицу cardidx дату и время успешной записи
-
-                              } else
-                              {
-                                  string mess = "Причина неудачной записи.";
-                                  db.incrementCardindev((int)row["id_dev"], card.id);//количество попыток увеличть на 1.
-                                  db.updateCaridxErr((int)row["id_dev"], card.id, mess);//зафиксировать неуспешную попытку записи.
-
-                              }
-
-                          }
-                          if(card.attempt == 2)//удаление идентификатор из панели
-                          {
-                              db.delFromCardindev((int)row["id_dev"], card.id);//удалить карту из таблицы cardindev
-                              //с таблицей cardidx работа не ведется, т.к. там информации о картах уже нет
-
-                          } else
-                          {
-                              db.incrementCardindev((int)row["id_dev"], card.id);
-                              //с таблицей cardidx работа не ведется, т.к. там информации о картах уже нет
-                          }
-
-                      }
-
-                  } else
-                  {
-                      //нет очереди. возможно, это надо зафиксировать в лог-файле.
-                  }
-
-                  //сбор событий
-                  /*
-                   * тут надо организовать цикл выбора событий из панели и запись событий в БД СКУД.
-                   * 
-                   * 
-                   *//*
-              } else //авторизация прошла неуспешно
-              {
-                  //сохранить в лог запись о неудачной авторизации.
-                  db.updateCaridxErrAll((int)row["id_dev"], card.id, "Ошибка авторизации.");//поставить отметку для всех карт этой панели
-
-              }
-
-          }*/
-        //con.Close();
-        //  Thread.Sleep(1000);
-        // logger.LogDebug(dev.ip.ToString()+" | "+dev.id_dev_door0 + " | " +dev.id_dev_door1+" | "+dev.name+ " | " + dev.id_ctrl);
+      
+       
     }
     }
