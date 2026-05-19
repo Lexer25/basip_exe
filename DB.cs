@@ -122,6 +122,37 @@ public class DB
             return false;
         }
     }
+    //установка состояния связи с панелью 0 - нет связи, 1 - есть связь
+    public bool SetOnlineState(int id_dev, int state)
+    {
+        using var con = CreateConnection();
+        try
+        {
+            con.Open();
+
+            string deleteSql = @"delete from bas_param bp 
+                                where bp.id_dev = @id_dev 
+                                and bp.param = 'ONLINE'";
+
+            using var deleteCommand = new FbCommand(deleteSql, con);
+            deleteCommand.Parameters.AddWithValue("@id_dev", id_dev);
+            deleteCommand.ExecuteNonQuery();
+
+            string insertSql = @"INSERT INTO BAS_PARAM (ID_DEV, PARAM, INTVALUE) 
+                                VALUES (@id_dev, 'ONLINE', @state)";
+            using var insertCommand = new FbCommand(insertSql, con);
+            insertCommand.Parameters.AddWithValue("@id_dev", id_dev);
+            insertCommand.Parameters.AddWithValue("@state", state);
+            insertCommand.ExecuteNonQuery();
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error setting last event ID: {ex.Message}");
+            return false;
+        }
+    }
 
     public bool SetLastEventID(int id_dev, long eventId)
     {

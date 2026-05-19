@@ -181,15 +181,17 @@ namespace Basip
         {
             String auth = "Auth OK";
             int currentDeviceId = (int)row["id_dev"];
+           
             Device dev = new Device(row, options.time_wait_http);
 
             JsonDocument deviceInfo = await dev.GetInfo();
             if (deviceInfo == null)
             {
-                logger.LogWarning($"Device {dev.base_url} - GetInfo returned null");
+                //logger.LogWarning($"Device {dev.base_url} - GetInfo returned null");
+                dbForEvents.SetOnlineState(currentDeviceId, 0);
                 return;
             }
-
+            
             if (!await dev.Auth())
             {
                 auth = "Auth ERR";
@@ -200,6 +202,8 @@ namespace Basip
             logger.LogInformation($"Device {currentDeviceId} ({dev.base_url}) STRVALUE for 'about': {strValue}");
             // Записываем значенме в базу данных
             dbForEvents.InsertAbout(currentDeviceId, strValue);
+            dbForEvents.SetOnlineState(currentDeviceId, 1);
+
             // =======================================
 
             if (!await dev.Auth())
@@ -214,10 +218,18 @@ namespace Basip
             }
 
             string firmwareVersion = "unknown";
+            string _apiVersion = "unknown";
+
             if (deviceInfo.RootElement.TryGetProperty("firmware_version", out JsonElement fwElement))
             //if (deviceInfo.RootElement.TryGetProperty("api_version", out JsonElement fwElement))
             {
                 firmwareVersion = fwElement.GetString() ?? "unknown";
+            }
+
+             if (deviceInfo.RootElement.TryGetProperty("api_version", out  fwElement))
+            //if (deviceInfo.RootElement.TryGetProperty("api_version", out JsonElement fwElement))
+            {
+                _apiVersion = fwElement.GetString() ?? "unknown";
             }
 
             int major = 0, middle = 0;
@@ -231,7 +243,8 @@ namespace Basip
                 }
             }
 
-            logger.LogInformation($"Device {dev.base_url} firmware_version: {firmwareVersion}, major: {major}, middle: {middle}");
+            logger.LogInformation($"239 Device {dev.base_url} firmware_version: {firmwareVersion}, major: {major}, middle: {middle}");
+            logger.LogInformation($"247 Device {dev.base_url} apiVersion: {_apiVersion}, major: {major}, middle: {middle}");
 
             // Прекращаем работу, если версия > 3.26.xx
             if (major > 4 || (major == 4 && middle > 00))
