@@ -217,25 +217,19 @@ namespace Basip
                 return;
             }
 
-            string firmwareVersion = "unknown";
+           // string firmwareVersion = "unknown";
             string _apiVersion = "unknown";
 
-            if (deviceInfo.RootElement.TryGetProperty("firmware_version", out JsonElement fwElement))
-            //if (deviceInfo.RootElement.TryGetProperty("api_version", out JsonElement fwElement))
-            {
-                firmwareVersion = fwElement.GetString() ?? "unknown";
-            }
-
-             if (deviceInfo.RootElement.TryGetProperty("api_version", out  fwElement))
-            //if (deviceInfo.RootElement.TryGetProperty("api_version", out JsonElement fwElement))
-            {
+          
+             if (deviceInfo.RootElement.TryGetProperty("api_version", out JsonElement fwElement))
+               {
                 _apiVersion = fwElement.GetString() ?? "unknown";
             }
 
             int major = 0, middle = 0;
-            if (!string.IsNullOrEmpty(firmwareVersion) && firmwareVersion != "unknown")
+            if (!string.IsNullOrEmpty(_apiVersion) && _apiVersion != "unknown")
             {
-                var parts = firmwareVersion.Split('.');
+                var parts = _apiVersion.Split('.');
                 if (parts.Length >= 2)
                 {
                     int.TryParse(parts[0], out major);
@@ -243,13 +237,12 @@ namespace Basip
                 }
             }
 
-            logger.LogInformation($"239 Device {dev.base_url} firmware_version: {firmwareVersion}, major: {major}, middle: {middle}");
             logger.LogInformation($"247 Device {dev.base_url} apiVersion: {_apiVersion}, major: {major}, middle: {middle}");
 
-            // Прекращаем работу, если версия > 3.26.xx
-            if (major > 4 || (major == 4 && middle > 00))
+            //контроле версии API. С версиями 3.Х и выше не работаем
+            if (major > 3 || (major == 3 && middle > 00))
             {
-                logger.LogWarning($"Device {dev.base_url} firmware version {firmwareVersion} is higher than allowed (3.26.xx). Stopping work with this panel.");
+                logger.LogWarning($"Device {dev.base_url} apiVersion version {_apiVersion} is higher than allowed (3.x). Stopping work with this panel.");
                 return;
             }
 
