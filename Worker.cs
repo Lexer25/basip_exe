@@ -667,8 +667,21 @@ namespace Basip
                 //// Тип события для информации
 
                 string eventType = logEvent.name?.key ?? "Unknown";
-                DateTime dateTime = DateTimeOffset.FromUnixTimeMilliseconds(logEvent.timestamp).DateTime;
-                string note = $"Device=\"{dev.name}\", Type={eventType} Readdate=#{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}# DeviceDate =#{dateTime}# DeviceDate = {logEvent.timestamp}";
+                //DateTime dateTime = DateTimeOffset.FromUnixTimeMilliseconds(logEvent.timestamp).DateTime;
+                DateTime dateTime = DateTimeOffset.FromUnixTimeMilliseconds(logEvent.timestamp).UtcDateTime;
+                //string note = $"Device=\"{dev.name}\", Type={eventType}, Readdate=#{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}# DeviceDate =#{dateTime}# RowDeviceDate = {logEvent.timestamp}";
+
+                // 2. В строке явно укажите формат и добавьте пометку UTC
+                /*
+                  string note = $"Device=\"{dev.name}\", Type={eventType} " +
+                              $"Readdate=#{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}# " +
+                              $"DeviceDate =#{dateTime} " +  // <-- вот здесь правка
+                              $"RowDeviceDate = {logEvent.timestamp}";
+                */
+                string note = $"Device=\"{dev.name}\", Type={eventType} " +
+                              $"Readdate=#{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}# " +
+                              $"DeviceDate =#{dateTime:yyyy-MM-dd HH:mm:ss} UTC# " + // <-- явный формат + UTC
+                                $"RowDeviceDate = {logEvent.timestamp}";
 
                 if (eventCode > 0)
                 {
@@ -678,7 +691,7 @@ namespace Basip
                         id_cntrl: dev.ctrl,
                         id_reader: 0,
                         note: cardNumber,
-                        time: logEvent.EventTime,
+                        time: dateTime,
                         id_video: null,
                         id_user: null,
                         ess1: null,
