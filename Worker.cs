@@ -668,20 +668,12 @@ namespace Basip
 
                 string eventType = logEvent.name?.key ?? "Unknown";
                 //DateTime dateTime = DateTimeOffset.FromUnixTimeMilliseconds(logEvent.timestamp).DateTime;
-                DateTime dateTime = DateTimeOffset.FromUnixTimeMilliseconds(logEvent.timestamp).UtcDateTime;
-                //string note = $"Device=\"{dev.name}\", Type={eventType}, Readdate=#{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}# DeviceDate =#{dateTime}# RowDeviceDate = {logEvent.timestamp}";
-
-                // 2. В строке явно укажите формат и добавьте пометку UTC
-                /*
-                  string note = $"Device=\"{dev.name}\", Type={eventType} " +
-                              $"Readdate=#{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}# " +
-                              $"DeviceDate =#{dateTime} " +  // <-- вот здесь правка
-                              $"RowDeviceDate = {logEvent.timestamp}";
-                */
+                DateTime dateTime = DateTimeOffset.FromUnixTimeMilliseconds(logEvent.timestamp).LocalDateTime;
+               
                 string note = $"Device=\"{dev.name}\", Type={eventType} " +
                               $"Readdate=#{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}# " +
-                              $"DeviceDate =#{dateTime:yyyy-MM-dd HH:mm:ss} UTC# " + // <-- явный формат + UTC
-                                $"RowDeviceDate = {logEvent.timestamp}";
+                              $"DeviceDate =#{dateTime:yyyy-MM-dd HH:mm:ss}# " + // <-- явный формат + UTC
+                              $"RowDeviceDate = {logEvent.timestamp}";
 
                 if (eventCode > 0)
                 {
