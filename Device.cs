@@ -258,13 +258,15 @@ namespace Basip
             request.AddQueryParameter("sort_type", "asc"); // от старых к новым
 
             // ПРАВИЛЬНЫЙ ФОРМАТ ФИЛЬТРА для Bas-IP API
+
             if (fromTimestamp > 0)
             {
                 // Преобразуем timestamp в Unix time в секундах
-                request.AddQueryParameter("from", (fromTimestamp/1000).ToString());
+                //request.AddQueryParameter("from", (fromTimestamp/1000).ToString());
+                request.AddQueryParameter("from", (fromTimestamp).ToString());
             }
-            long unixSeconds = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 10800) * 1000;
-            request.AddQueryParameter("to", unixSeconds.ToString());
+            //long unixSeconds = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 10800) * 1000;
+            //request.AddQueryParameter("to", unixSeconds.ToString());
             request.AddHeader("Accept", "application/json");
             request.AddHeader("Content-Type", "application/json");
 
@@ -272,6 +274,31 @@ namespace Basip
             {
                 request.AddHeader("Authorization", "Bearer " + token);
             }
+
+
+            // ДЕТАЛЬНЫЙ ВЫВОД
+/*            var sb = new StringBuilder();
+            sb.AppendLine("=== REQUEST DETAILS ===");
+            sb.AppendLine($"Method: GET");
+            sb.AppendLine($"Base URL: {restClient.Options.BaseUrl}");
+            sb.AppendLine($"Resource: {request.Resource}");
+            sb.AppendLine($"Full URL: {restClient.Options.BaseUrl}/{request.Resource}");
+
+            sb.AppendLine("\n--- Parameters ---");
+            foreach (var param in request.Parameters)
+            {
+                sb.AppendLine($"  {param.Type}: {param.Name} = {param.Value}");
+            }
+
+            sb.AppendLine("\n--- Headers ---");
+            foreach (var header in request.Parameters.Where(p => p.Type == ParameterType.HttpHeader))
+            {
+                sb.AppendLine($"  {header.Name}: {header.Value}");
+            }
+
+            sb.AppendLine("====================");
+            Console.WriteLine(sb.ToString());*/
+
 
             return await restClient.ExecuteGetAsync(request);
         }
