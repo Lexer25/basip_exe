@@ -2,6 +2,7 @@
 using Microsoft.Extensions.Logging;
 using RestSharp;
 using Serilog.Core;
+using Serilog.Events;
 using System.Data;
 using System.Diagnostics;
 using System.Net;
@@ -261,7 +262,7 @@ namespace Basip
                 }
                 else
                 {
-                    logger.LogTrace($"264 id_dev={dev.id_dev} Last event timestamp for device {currentDeviceId} IP: {dev.base_url}: {DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss}");
+                    logger.LogTrace($"264 id_dev={dev.id_dev} Старт сбор событий IP: {dev.base_url} начиная с метки времени {DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss}");
                 }
 
                 // Получаем события НАЧИНАЯ С последнего timestamp (включительно)
@@ -273,7 +274,7 @@ namespace Basip
 
                     if (logsData?.list_items != null && logsData.list_items.Count > 0)//если есть события, то начинаю обработку
                     {
-                        logger.LogTrace($"276 id_dev={dev.id_dev} Retrieved {logsData.list_items.Count} events from device base_url= {dev.base_url}");
+                        logger.LogTrace($"276 id_dev={dev.id_dev} Получено {logsData.list_items.Count} событий от device base_url= {dev.base_url}");
 
                         long maxTimestamp = lastTimestamp;
                         int processedEventsCount = 0;
@@ -288,7 +289,8 @@ namespace Basip
                                 {
                                     maxTimestamp = logItem.timestamp;//собираю максимальную метку времени, т.к. нет гарантии, что события идут последовательно.
                                 }
-
+                                // Для отладки можно вывести полный JSON
+                logger.LogDebug("293 id_dev={dev.id_dev} IP: {dev.base_url} текст события LogItem: {LogItem}", JsonSerializer.Serialize(logItem));
                                 await ProcessLogEvent(dbForEvents, dev, logItem, currentDeviceId, deviceInfo);//записываю событий в базу данных СКУД
                                 processedEventsCount++;//счетчик: сколько событий записано
                             }
@@ -301,7 +303,7 @@ namespace Basip
                         if (processedEventsCount > 0)
                         {
                             dbForEvents.SetLastEventID(currentDeviceId, maxTimestamp);//запись последней метки времени в базу данных. Дальше опрос начнется с этой метки
-                            logger.LogDebug($"304 id_dev={dev.id_dev} Processed {processedEventsCount} events, updated timestamp to: {DateTimeOffset.FromUnixTimeMilliseconds(maxTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss}");//фиксирую в логе сколько записей было сделано для указанного id_dev={dev.id_dev}
+                            logger.LogDebug($"304 id_dev={dev.id_dev} Обработано {processedEventsCount} событий, последняя метка времени to: {DateTimeOffset.FromUnixTimeMilliseconds(maxTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss}");//фиксирую в логе сколько записей было сделано для указанного id_dev={dev.id_dev}
 
                             if (options.clear_log)
                             {
@@ -323,7 +325,7 @@ namespace Basip
                         }
                         else
                         {
-                            logger.LogInformation($"326 id_dev={dev.id_dev} No new events to process IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}");
+                            logger.LogInformation($"326 id_dev={dev.id_dev} Нет новых события для IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}");
                         }
                     }
                     else
