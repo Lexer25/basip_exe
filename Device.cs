@@ -277,7 +277,7 @@ namespace Basip
 
 
             // ДЕТАЛЬНЫЙ ВЫВОД
-/*            var sb = new StringBuilder();
+            var sb = new StringBuilder();
             sb.AppendLine("=== REQUEST DETAILS ===");
             sb.AppendLine($"Method: GET");
             sb.AppendLine($"Base URL: {restClient.Options.BaseUrl}");
@@ -297,7 +297,7 @@ namespace Basip
             }
 
             sb.AppendLine("====================");
-            Console.WriteLine(sb.ToString());*/
+            Console.WriteLine(sb.ToString());
 
 
             return await restClient.ExecuteGetAsync(request);
