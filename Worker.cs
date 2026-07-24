@@ -147,17 +147,18 @@ namespace Basip
                 {
                     if (row["IP"] == DBNull.Value || Convert.ToInt32(row["IP"]) == 0)
                     {
-                        logger.LogDebug($"149 Skipping device ID {row["id_dev"]} - no IP address");
+                        logger.LogDebug($"149-0 Skipping device ID {row["id_dev"]} - no IP address");
                         continue;
                     }
-
+                    logger.LogDebug($"149-1  device ID {row["id_dev"]} IP {row["id_dev"]} is OK");
                     Device device = new Device(row, options.time_wait_http);
                     validDevicesCount++;
+                    logger.LogDebug($"149-2 start TaskGet ID {row["id_dev"]}");
                     tasks.Add(TaskGet(row, db));
                 }
                 catch (Exception ex)
                 {
-                    logger.LogDebug($"159 Failed to create device from row ID {row["id_dev"]}: {ex.Message}");
+                    logger.LogDebug($"149-3 Failed to create device from row ID {row["id_dev"]}: {ex.Message}");
                     continue;
                 }
             }
@@ -188,7 +189,8 @@ namespace Basip
             JsonDocument deviceInfo = await dev.GetInfo();
             if (deviceInfo == null)
             {
-                //logger.LogWarning($"Device {dev.base_url} - GetInfo returned null");
+                logger.LogWarning($"192 Device {dev.base_url} - GetInfo returned null");
+                dbForEvents.FixDeviceErr("Device not connected", currentDeviceId);
                 dbForEvents.SetOnlineState(currentDeviceId, 0);
                 return;
             }
@@ -196,6 +198,7 @@ namespace Basip
             if (!await dev.Auth())
             {
                 auth = "Auth ERR";
+                
             }
 
             // === НОВЫЙ КОД: Формирование STRVALUE ===
@@ -210,11 +213,13 @@ namespace Basip
             if (!await dev.Auth())
             {
                 logger.LogInformation($"211 id_dev={dev.id_dev} Device  {dev.base_url} auth failed");
+                dbForEvents.FixDeviceErr("Auth ERR", currentDeviceId);
                 return;
             }
             if (!dev.is_online)
             {
                 logger.LogDebug($"216 id_dev={dev.id_dev} Device {dev.base_url} offline");
+                dbForEvents.FixDeviceErr("Devcice offline", currentDeviceId);
                 return;
             }
 

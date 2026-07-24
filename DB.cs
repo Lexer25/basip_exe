@@ -1,5 +1,6 @@
 ﻿using FirebirdSql.Data.FirebirdClient;
 using System.Data;
+using static System.Runtime.InteropServices.JavaScript.JSType;
 
 public class DB
 {
@@ -399,6 +400,42 @@ public class DB
 
                 rowsUpdated = insertCommand.ExecuteNonQuery();
             }
+
+            return rowsUpdated;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error in FixCardIdxOK: {ex.Message}");
+            return 0;
+        }
+    }
+
+    /* фиксация проблем для все карт в очереди, если панель по каким-то причинам недоступна
+     * 
+     */
+
+    public int FixDeviceErr(string messErr, int idDev)
+    {
+        using var con = CreateConnection();
+        con.Open();
+        
+        try
+        {
+            
+            string updateSql = @"UPDATE CARDIDX cdx SET
+                LOAD_TIME = CURRENT_TIMESTAMP,
+                LOAD_RESULT = @messErr
+                WHERE (ID_CARD not containing 'OK')
+                AND (ID_DEV in(
+                select d2.id_dev from device d
+                join device d2 on d2.id_ctrl=d.id_ctrl and d2.id_reader in (0,1)
+                where d.id_dev=@idDev
+                 ))";
+            Console.WriteLine($"430 updateSql id_dev: {idDev}");
+            using var updateCommand = new FbCommand(updateSql, con);
+            updateCommand.Parameters.AddWithValue("@messErr", messErr);
+            updateCommand.Parameters.AddWithValue("@idDev", idDev);
+            int rowsUpdated = updateCommand.ExecuteNonQuery();
 
             return rowsUpdated;
         }

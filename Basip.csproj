@@ -6,8 +6,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>dotnet-Basip-cb8c693b-e5ee-4fcf-9faa-8403bced6feb</UserSecretsId>
-    <AssemblyVersion>2.0.3.1</AssemblyVersion>
-    <FileVersion>2.0.3.1</FileVersion>
+    <AssemblyVersion>2.0.3.2</AssemblyVersion>
+    <FileVersion>2.0.3.2</FileVersion>
     <AssemblyName>basipkeysservices</AssemblyName>
   </PropertyGroup>
 
