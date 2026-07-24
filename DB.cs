@@ -22,19 +22,7 @@ public class DB
     private string ValidateAndFixConnectionString(string connectionString)
     {
 
-        Console.WriteLine("=== ValidateAndFixConnectionString CALLED ===");
-
-        // ДИАГНОСТИКА 2: проверяем, что логгер не null
-        if (_logger == null)
-        {
-            Console.WriteLine("!!! _logger is NULL !!!");
-        }
-        else
-        {
-            Console.WriteLine("_logger is NOT NULL");
-            // Пытаемся записать лог
-            _logger.LogInformation("=== DIAGNOSTIC: Logger is working ===");
-        }
+       
         // 1. ПРОВЕРКА НА NULL И ПУСТУЮ СТРОКУ
         if (string.IsNullOrWhiteSpace(connectionString))
         {
@@ -96,10 +84,19 @@ public class DB
                     "82 Database file does not exist at: {Path}. Please verify the path is correct.",
                     databasePath
                 );
-                // Не выбрасываем исключение, т.к. БД может быть создана позже
-                // или находиться на сетевом диске
+                throw new FileNotFoundException(
+                    $"Database file not found: {databasePath}. " +
+                    "Please verify the path in appsettings.json is correct."
+                );
             }
         }
+        
+            var fileInfo = new FileInfo(databasePath);
+            _logger?.LogInformation(
+                "96 Database file found. Size: {Size} MB",
+                fileInfo.Length / 1024 / 1024
+            );
+        
 
         _logger?.LogInformation("Connection string validation completed successfully");
         return connectionString;

@@ -94,7 +94,7 @@ namespace Basip
                     Environment.Exit(1);
                 }
 
-                logger.LogInformation("96 Ok connect database");
+                logger.LogInformation("97 Ok connect database");
 
                 // Получаем устройства один раз при старте
                 devices = db.GetDevice().Rows;
