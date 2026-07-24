@@ -4,11 +4,122 @@ using static System.Runtime.InteropServices.JavaScript.JSType;
 
 public class DB
 {
-    private string _connectionString;
+    private readonly string _connectionString;
+    private readonly ILogger? _logger;
 
-    public DB(string connectionString)
+    public DB(string connectionString, ILogger? logger = null)
     {
-        _connectionString = connectionString;
+        _logger = logger;
+
+        // ВАЛИДАЦИЯ ДО ВСЕГО ОСТАЛЬНОГО
+        _connectionString = ValidateAndFixConnectionString(connectionString);
+    }
+
+    public DB(string connectionString) : this(connectionString, null)
+    {
+    }
+
+    private string ValidateAndFixConnectionString(string connectionString)
+    {
+
+        Console.WriteLine("=== ValidateAndFixConnectionString CALLED ===");
+
+        // ДИАГНОСТИКА 2: проверяем, что логгер не null
+        if (_logger == null)
+        {
+            Console.WriteLine("!!! _logger is NULL !!!");
+        }
+        else
+        {
+            Console.WriteLine("_logger is NOT NULL");
+            // Пытаемся записать лог
+            _logger.LogInformation("=== DIAGNOSTIC: Logger is working ===");
+        }
+        // 1. ПРОВЕРКА НА NULL И ПУСТУЮ СТРОКУ
+        if (string.IsNullOrWhiteSpace(connectionString))
+        {
+            // Логируем критическую ошибку
+            _logger?.LogCritical("Connection string is null or empty! Please check appsettings.json");
+
+            // Выбрасываем понятное исключение с инструкцией
+            throw new InvalidOperationException(
+                "Database connection string is not configured. " +
+                "Please add 'db_config' to 'Service' section in appsettings.json.\n" +
+                "Example: \"db_config\": \"User=SYSDBA;Password=temp;Database=D:\\testdb\\hl1\\shieldpro_rest.gdb;DataSource=127.0.0.1;Port=3050;\""
+            );
+        }
+
+        // 2. Убираем лишние кавычки (проблема в вашем appsettings.json)
+        string fixedString = connectionString.Trim('"');
+        if (fixedString != connectionString)
+        {
+            _logger?.LogWarning("Connection string had extra quotes, fixed automatically");
+            connectionString = fixedString;
+        }
+
+        // 3. Проверяем наличие обязательных параметров
+        var requiredParams = new[] { "User", "Password", "Database", "DataSource" };
+        var missingParams = new List<string>();
+
+        foreach (var param in requiredParams)
+        {
+            if (!connectionString.Contains(param, StringComparison.OrdinalIgnoreCase))
+            {
+                missingParams.Add(param);
+            }
+        }
+
+        if (missingParams.Any())
+        {
+            // Если нет Database или DataSource - критично
+            if (missingParams.Contains("Database") || missingParams.Contains("DataSource"))
+            {
+                throw new InvalidOperationException(
+                    $"Connection string missing critical parameters: {string.Join(", ", missingParams)}\n" +
+                    $"Current string: {connectionString}"
+                );
+            }
+
+            _logger?.LogWarning(
+                "Connection string missing recommended parameters: {MissingParams}",
+                string.Join(", ", missingParams)
+            );
+        }
+
+        // 4. Проверка существования файла БД
+        string databasePath = ExtractDatabasePath(connectionString);
+        if (!string.IsNullOrEmpty(databasePath))
+        {
+            if (!File.Exists(databasePath))
+            {
+                _logger?.LogWarning(
+                    "82 Database file does not exist at: {Path}. Please verify the path is correct.",
+                    databasePath
+                );
+                // Не выбрасываем исключение, т.к. БД может быть создана позже
+                // или находиться на сетевом диске
+            }
+        }
+
+        _logger?.LogInformation("Connection string validation completed successfully");
+        return connectionString;
+    }
+
+    private string ExtractDatabasePath(string connectionString)
+    {
+        try
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(
+                connectionString,
+                @"Database\s*=\s*([^;]+)",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+            );
+            return match.Success ? match.Groups[1].Value.Trim().Trim('"') : string.Empty;
+        }
+        catch
+        {
+            return string.Empty;
+        }
     }
 
     private FbConnection CreateConnection()
@@ -216,7 +327,160 @@ public class DB
         }
     }
 
-    public int? EventInsert(int id_db = 1, int? id_eventtype = null, int? id_cntrl = null,
+    /// <summary>
+    /// Вставка события в базу данных через хранимую процедуру DEVICEEVENTS_INSERT
+    /// </summary>
+    /// <returns>ID вставленного события или null при ошибке</returns>
+    public int? EventInsert(
+        int id_db = 1,
+        int? id_eventtype = null,
+        int? id_cntrl = null,
+        int? id_reader = null,
+        string note = null,
+        DateTime? time = null,
+        int? id_video = null,
+        int? id_user = null,
+        int? ess1 = null,
+        int? ess2 = null,
+        int? idsource = null,
+        long? idserverts = null)
+    {
+        // Используем пул соединений (если включен в строке подключения)
+        using var con = CreateConnection();
+
+        try
+        {
+            // Открываем соединение с таймаутом
+            con.Open();
+
+            // Используем параметризованный запрос для защиты от SQL-инъекций
+            const string sql = @"EXECUTE PROCEDURE DEVICEEVENTS_INSERT(
+            @id_db, @id_eventtype, @id_cntrl, @id_reader, @note, @time, 
+            @id_video, @id_user, @ess1, @ess2, @idsource, @idserverts)";
+
+            using var command = new FbCommand(sql, con);
+
+            // Настройка таймаута выполнения команды (30 секунд)
+            command.CommandTimeout = 30;
+
+            // Добавляем все параметры с явным указанием типов
+            command.Parameters.AddWithValue("@id_db", id_db);
+
+            // Для nullable параметров используем DBNull.Value если null
+            command.Parameters.AddWithValue("@id_eventtype",
+                id_eventtype ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("@id_cntrl",
+                id_cntrl ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("@id_reader",
+                id_reader ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("@note",
+                note ?? (object)DBNull.Value);
+
+            // Обработка времени с проверкой
+            string timeString;
+            if (time.HasValue)
+            {
+                // Убеждаемся, что время в правильном формате для Firebird
+                timeString = time.Value.ToString("yyyy-MM-dd HH:mm:ss");
+            }
+            else
+            {
+                timeString = "NOW"; // Используем NOW как строку, а не как функцию
+            }
+            command.Parameters.AddWithValue("@time", timeString);
+
+            command.Parameters.AddWithValue("@id_video",
+                id_video ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("@id_user",
+                id_user ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("@ess1",
+                ess1 ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("@ess2",
+                ess2 ?? (object)DBNull.Value);
+            command.Parameters.AddWithValue("@idsource",
+                idsource ?? 1);
+
+            // Обработка timestamp с проверкой на отрицательные значения
+            object serverTsValue = DBNull.Value;
+            if (idserverts.HasValue && idserverts.Value > 0)
+            {
+                // Конвертируем миллисекунды в секунды и проверяем на переполнение
+                long seconds = idserverts.Value / 1000;
+                if (seconds > 0 && seconds <= int.MaxValue)
+                {
+                    serverTsValue = (int)seconds;
+                }
+            }
+            command.Parameters.AddWithValue("@idserverts", serverTsValue);
+
+            // Добавляем выходной параметр с явным указанием типа
+            var outputParam = new FbParameter("@return_value", FbDbType.Integer)
+            {
+                Direction = ParameterDirection.ReturnValue
+            };
+            command.Parameters.Add(outputParam);
+
+            // Выполняем команду
+            int rowsAffected = command.ExecuteNonQuery();
+
+            // Получаем возвращаемое значение
+            if (outputParam.Value != DBNull.Value)
+            {
+                int result = Convert.ToInt32(outputParam.Value);
+
+                // Логируем успешную вставку (если есть логгер)
+                _logger?.LogDebug(
+                    "Event inserted successfully. ID: {EventId}, Device: {DeviceId}, Type: {EventType}",
+                    result, id_cntrl ?? 0, id_eventtype ?? 0);
+
+                return result;
+            }
+
+            _logger?.LogWarning("Event inserted but no return value received");
+            return null;
+        }
+        catch (FbException fbEx)
+        {
+            // Специфичная обработка ошибок Firebird
+            _logger?.LogError(fbEx,
+                "Firebird error inserting event. Device: {DeviceId}, EventType: {EventType}, ErrorCode: {ErrorCode}",
+                id_cntrl ?? 0, id_eventtype ?? 0, fbEx.ErrorCode);
+
+            // Проверяем на deadlock или timeout
+            if (fbEx.Message.Contains("deadlock") || fbEx.Message.Contains("timeout"))
+            {
+                // Можно добавить логику повторной попытки
+                _logger?.LogWarning("Deadlock or timeout detected, event may need retry");
+            }
+
+            return null;
+        }
+        catch (InvalidOperationException invEx)
+        {
+            _logger?.LogError(invEx,
+                "Invalid operation while inserting event. Device: {DeviceId}",
+                id_cntrl ?? 0);
+            return null;
+        }
+        catch (Exception ex)
+        {
+            // Общая ошибка
+            _logger?.LogError(ex,
+                "Unexpected error inserting event. Device: {DeviceId}, EventType: {EventType}",
+                id_cntrl ?? 0, id_eventtype ?? 0);
+            return null;
+        }
+        finally
+        {
+            // Соединение будет закрыто автоматически благодаря using
+            // Но явно закроем, если соединение все еще открыто
+            if (con.State != ConnectionState.Closed && con.State != ConnectionState.Broken)
+            {
+                con.Close();
+            }
+        }
+    }
+    public int? _EventInsert(int id_db = 1, int? id_eventtype = null, int? id_cntrl = null,
                            int? id_reader = null, string note = null, DateTime? time = null,
                            int? id_video = null, int? id_user = null, int? ess1 = null,
                            int? ess2 = null, int? idsource = null, long? idserverts = null)

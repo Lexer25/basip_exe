@@ -85,7 +85,7 @@ namespace Basip
                 logger.LogInformation($"84 Версия приложения basip: {version}");
 
                 // Создаем экземпляр DB с connection string
-                db = new DB(options.db_config);
+                db = new DB(options.db_config, logger);
 
                 // Проверяем наличие обязательных таблиц
                 if (!db.CheckRequiredTables(logger))
@@ -349,7 +349,7 @@ namespace Basip
             }
 
             // ОБРАБОТКА КАРТ: создаем новый экземпляр DB для работы с картами
-            DB dbForCards = new DB(options.db_config);
+            DB dbForCards = new DB(options.db_config, logger);
 
             try
             {
