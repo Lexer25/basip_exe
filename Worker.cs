@@ -189,7 +189,7 @@ namespace Basip
             JsonDocument deviceInfo = await dev.GetInfo();
             if (deviceInfo == null)
             {
-                logger.LogWarning($"192 Device {dev.base_url} - GetInfo returned null");
+                logger.LogInformation($"192 id_dev={dev.id_dev} IP {dev.base_url} - нет связи. ");
                 dbForEvents.FixDeviceErr("Device not connected", currentDeviceId);
                 dbForEvents.SetOnlineState(currentDeviceId, 0);
                 return;
