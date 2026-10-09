@@ -2,16 +2,19 @@
 using System.Data;
 using static System.Runtime.InteropServices.JavaScript.JSType;
 
+using FirebirdSql.Data.FirebirdClient;
+using System.Data;
+using System.Text.RegularExpressions;
+
 public class DB
 {
     private readonly string _connectionString;
     private readonly ILogger? _logger;
+    private bool _connectionValidated = false;
 
     public DB(string connectionString, ILogger? logger = null)
     {
         _logger = logger;
-
-        // ВАЛИДАЦИЯ ДО ВСЕГО ОСТАЛЬНОГО
         _connectionString = ValidateAndFixConnectionString(connectionString);
     }
 
@@ -21,23 +24,17 @@ public class DB
 
     private string ValidateAndFixConnectionString(string connectionString)
     {
-
-       
         // 1. ПРОВЕРКА НА NULL И ПУСТУЮ СТРОКУ
         if (string.IsNullOrWhiteSpace(connectionString))
         {
-            // Логируем критическую ошибку
-            _logger?.LogCritical("Connection string is null or empty! Please check appsettings.json");
-
-            // Выбрасываем понятное исключение с инструкцией
+            _logger?.LogCritical("Connection string is null or empty!");
             throw new InvalidOperationException(
                 "Database connection string is not configured. " +
-                "Please add 'db_config' to 'Service' section in appsettings.json.\n" +
-                "Example: \"db_config\": \"User=SYSDBA;Password=temp;Database=D:\\testdb\\hl1\\shieldpro_rest.gdb;DataSource=127.0.0.1;Port=3050;\""
+                "Please add 'db_config' to 'Service' section in appsettings.json."
             );
         }
 
-        // 2. Убираем лишние кавычки (проблема в вашем appsettings.json)
+        // 2. Убираем лишние кавычки
         string fixedString = connectionString.Trim('"');
         if (fixedString != connectionString)
         {
@@ -59,7 +56,6 @@ public class DB
 
         if (missingParams.Any())
         {
-            // Если нет Database или DataSource - критично
             if (missingParams.Contains("Database") || missingParams.Contains("DataSource"))
             {
                 throw new InvalidOperationException(
@@ -74,52 +70,313 @@ public class DB
             );
         }
 
-        // 4. Проверка существования файла БД
-        string databasePath = ExtractDatabasePath(connectionString);
-        if (!string.IsNullOrEmpty(databasePath))
+        // 4. ✅ ПРОВЕРЯЕМ ПОДКЛЮЧЕНИЕ К БАЗЕ ДАННЫХ
+        _logger?.LogInformation("Testing database connection...");
+
+        try
         {
-            if (!File.Exists(databasePath))
-            {
-                _logger?.LogWarning(
-                    "82 Database file does not exist at: {Path}. Please verify the path is correct.",
-                    databasePath
-                );
-                throw new FileNotFoundException(
-                    $"Database file not found: {databasePath}. " +
-                    "Please verify the path in appsettings.json is correct."
-                );
-            }
+            using var con = new FbConnection(connectionString);
+            con.Open();
+
+            // Выполняем простой запрос для проверки
+            using var cmd = new FbCommand("SELECT 1 FROM RDB$DATABASE", con);
+            cmd.ExecuteScalar();
+
+            con.Close();
+            _logger?.LogInformation("Database connection successful");
         }
-        
-            var fileInfo = new FileInfo(databasePath);
-            _logger?.LogInformation(
-                "96 Database file found. Size: {Size} MB",
-                fileInfo.Length / 1024 / 1024
+        catch (FbException fbEx)
+        {
+            string errorDetails = DecodeFirebirdError(fbEx, connectionString);
+
+            _logger?.LogCritical(
+                "================================================================================"
             );
-        
+            _logger?.LogCritical("DATABASE CONNECTION FAILED!");
+            _logger?.LogCritical("{ErrorDetails}", errorDetails);
+            _logger?.LogCritical(
+                "================================================================================"
+            );
+            _logger?.LogCritical("Connection string: {ConnectionString}", connectionString);
+            _logger?.LogCritical(
+                "================================================================================"
+            );
+
+            throw new InvalidOperationException(
+                $"Cannot connect to database: {fbEx.Message}",
+                fbEx
+            );
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogCritical(
+                "================================================================================"
+            );
+            _logger?.LogCritical("DATABASE CONNECTION FAILED!");
+            _logger?.LogCritical("Error: {Error}", ex.Message);
+            _logger?.LogCritical(
+                "================================================================================"
+            );
+            _logger?.LogCritical("Connection string: {ConnectionString}", connectionString);
+            _logger?.LogCritical(
+                "================================================================================"
+            );
+
+            throw new InvalidOperationException(
+                $"Cannot connect to database: {ex.Message}",
+                ex
+            );
+        }
 
         _logger?.LogInformation("Connection string validation completed successfully");
+        _connectionValidated = true;
         return connectionString;
     }
 
+    private string DecodeFirebirdError(FbException fbEx, string connectionString)
+    {
+        var message = fbEx.Message;
+        var builder = new System.Text.StringBuilder();
+
+        // Извлекаем параметры для диагностики
+        string databasePath = ExtractDatabasePath(connectionString);
+        string dataSource = ExtractDataSource(connectionString);
+        string port = ExtractPort(connectionString);
+
+        if (message.Contains("Cannot find database") ||
+            message.Contains("I/O error") ||
+            message.Contains("CreateFile"))
+        {
+            builder.AppendLine("❌ THE DATABASE FILE WAS NOT FOUND OR CANNOT BE ACCESSED");
+            builder.AppendLine();
+            builder.AppendLine($"   Database path: {databasePath}");
+            builder.AppendLine($"   Server:        {dataSource}");
+            builder.AppendLine();
+            builder.AppendLine("   Possible causes:");
+            builder.AppendLine("   1. The file does not exist on the server");
+            builder.AppendLine("   2. The path is incorrect (check case sensitivity)");
+            builder.AppendLine("   3. Firebird service does not have read/write permissions");
+            builder.AppendLine("   4. The file is locked by another process");
+            builder.AppendLine("   5. The file is on a network drive that is not accessible");
+        }
+        else if (message.Contains("connection refused") ||
+                 message.Contains("unavailable") ||
+                 message.Contains("network error"))
+        {
+            builder.AppendLine("❌ CANNOT CONNECT TO FIREBIRD SERVER");
+            builder.AppendLine();
+            builder.AppendLine($"   Server: {dataSource}");
+            builder.AppendLine($"   Port:   {port}");
+            builder.AppendLine();
+            builder.AppendLine("   Possible causes:");
+            builder.AppendLine("   1. Firebird service is not running on the server");
+            builder.AppendLine("   2. Server is not reachable (check network/firewall)");
+            builder.AppendLine("   3. Wrong port number (default is 3050)");
+            builder.AppendLine("   4. Firebird is configured to use a different port");
+            builder.AppendLine("   5. Firebird is configured for local connections only");
+        }
+        else if (message.Contains("password") ||
+                 message.Contains("login") ||
+                 message.Contains("authentication"))
+        {
+            builder.AppendLine("❌ AUTHENTICATION FAILED");
+            builder.AppendLine();
+            builder.AppendLine($"   User: {ExtractUser(connectionString)}");
+            builder.AppendLine($"   Server: {dataSource}");
+            builder.AppendLine();
+            builder.AppendLine("   Possible causes:");
+            builder.AppendLine("   1. Wrong username or password");
+            builder.AppendLine("   2. User does not have access to the database");
+            builder.AppendLine("   3. User is not defined in Firebird security database");
+            builder.AppendLine("   4. Password has been changed");
+        }
+        else if (message.Contains("database shutdown"))
+        {
+            builder.AppendLine("❌ DATABASE IS IN SHUTDOWN STATE");
+            builder.AppendLine();
+            builder.AppendLine($"   Database: {databasePath}");
+            builder.AppendLine();
+            builder.AppendLine("   Possible causes:");
+            builder.AppendLine("   1. Database was manually shut down");
+            builder.AppendLine("   2. Database is being backed up");
+            builder.AppendLine("   3. Database is being restored");
+            builder.AppendLine("   4. Database is being maintained");
+        }
+        else if (message.Contains("version"))
+        {
+            builder.AppendLine("❌ INCOMPATIBLE DATABASE VERSION");
+            builder.AppendLine();
+            builder.AppendLine($"   Database: {databasePath}");
+            builder.AppendLine();
+            builder.AppendLine("   Possible causes:");
+            builder.AppendLine("   1. Database was created with newer Firebird version");
+            builder.AppendLine("   2. Client library version mismatch");
+            builder.AppendLine("   3. Database needs to be backed up and restored");
+        }
+        else if (message.Contains("corrupt") ||
+                 message.Contains("invalid"))
+        {
+            builder.AppendLine("❌ DATABASE IS CORRUPTED OR INVALID");
+            builder.AppendLine();
+            builder.AppendLine($"   Database: {databasePath}");
+            builder.AppendLine();
+            builder.AppendLine("   Possible causes:");
+            builder.AppendLine("   1. Database file is corrupted");
+            builder.AppendLine("   2. Database needs to be validated/repaired");
+            builder.AppendLine("   3. File system error");
+        }
+        else
+        {
+            builder.AppendLine("❌ DATABASE CONNECTION ERROR");
+            builder.AppendLine();
+            builder.AppendLine($"   Error: {message}");
+            builder.AppendLine($"   Server: {dataSource}");
+            builder.AppendLine($"   Database: {databasePath}");
+        }
+
+        builder.AppendLine();
+        builder.AppendLine("   💡 TROUBLESHOOTING:");
+        builder.AppendLine("   1. Check Firebird service is running");
+        builder.AppendLine("   2. Test connection with FlameRobin or ISQL");
+        builder.AppendLine("   3. Verify network connectivity and firewall settings");
+        builder.AppendLine("   4. Check file permissions on the database file");
+        builder.AppendLine("   5. Review Firebird log files for more details");
+
+        return builder.ToString();
+    }
+
+    // Вспомогательный метод для проверки подключения (для внешнего использования)
+    public bool TestConnection()
+    {
+        using var con = CreateConnection();
+        try
+        {
+            _logger?.LogInformation("Testing database connection...");
+            con.Open();
+
+            using var cmd = new FbCommand("SELECT 1 FROM RDB$DATABASE", con);
+            cmd.ExecuteScalar();
+
+            con.Close();
+            _logger?.LogInformation("Database connection test successful");
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Database connection test failed");
+            return false;
+        }
+    }
+
+    // Вспомогательный метод с расшифровкой ошибки
+    public bool TestConnection(out string errorMessage)
+    {
+        errorMessage = string.Empty;
+        using var con = CreateConnection();
+        try
+        {
+            _logger?.LogInformation("Testing database connection...");
+            con.Open();
+
+            using var cmd = new FbCommand("SELECT 1 FROM RDB$DATABASE", con);
+            cmd.ExecuteScalar();
+
+            con.Close();
+            _logger?.LogInformation("Database connection test successful");
+            return true;
+        }
+        catch (FbException fbEx)
+        {
+            errorMessage = DecodeFirebirdError(fbEx, _connectionString);
+            _logger?.LogError(fbEx, "Database connection test failed");
+            return false;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+            _logger?.LogError(ex, "Database connection test failed");
+            return false;
+        }
+    }
+
+    // Методы извлечения параметров из строки подключения
     private string ExtractDatabasePath(string connectionString)
     {
         try
         {
-            var match = System.Text.RegularExpressions.Regex.Match(
+            var match = Regex.Match(
                 connectionString,
                 @"Database\s*=\s*([^;]+)",
-                System.Text.RegularExpressions.RegexOptions.IgnoreCase
+                RegexOptions.IgnoreCase
             );
-            return match.Success ? match.Groups[1].Value.Trim().Trim('"') : string.Empty;
+            return match.Success ? match.Groups[1].Value.Trim().Trim('"') : "not specified";
         }
         catch
         {
-            return string.Empty;
+            return "unknown";
+        }
+    }
+
+    private string ExtractDataSource(string connectionString)
+    {
+        try
+        {
+            var match = Regex.Match(
+                connectionString,
+                @"DataSource\s*=\s*([^;]+)",
+                RegexOptions.IgnoreCase
+            );
+            return match.Success ? match.Groups[1].Value.Trim().Trim('"') : "not specified";
+        }
+        catch
+        {
+            return "unknown";
+        }
+    }
+
+    private string ExtractPort(string connectionString)
+    {
+        try
+        {
+            var match = Regex.Match(
+                connectionString,
+                @"Port\s*=\s*([^;]+)",
+                RegexOptions.IgnoreCase
+            );
+            return match.Success ? match.Groups[1].Value.Trim().Trim('"') : "3050 (default)";
+        }
+        catch
+        {
+            return "3050 (default)";
+        }
+    }
+
+    private string ExtractUser(string connectionString)
+    {
+        try
+        {
+            var match = Regex.Match(
+                connectionString,
+                @"User\s*=\s*([^;]+)",
+                RegexOptions.IgnoreCase
+            );
+            return match.Success ? match.Groups[1].Value.Trim().Trim('"') : "not specified";
+        }
+        catch
+        {
+            return "unknown";
         }
     }
 
     private FbConnection CreateConnection()
+    {
+        return new FbConnection(_connectionString);
+    }
+
+    // ... ОСТАЛЬНЫЕ МЕТОДЫ (TableExists, CheckRequiredTables, InsertAbout, и т.д.) ...
+
+
+private FbConnection CreateConnection()
     {
         return new FbConnection(_connectionString);
     }
