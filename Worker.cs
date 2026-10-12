@@ -1,3 +1,4 @@
+using Microsoft.Extensions.FileSystemGlobbing.Internal.PathSegments;
 using Microsoft.Extensions.Logging;
 using RestSharp;
 using System.Data;
@@ -312,6 +313,8 @@ namespace Basip
                 if (logsResponse.StatusCode == HttpStatusCode.OK && !string.IsNullOrEmpty(logsResponse.Content))
                 {
                     var logsData = JsonSerializer.Deserialize<Basip.LogsResponse>(logsResponse.Content);
+                    //текущее время.
+                    long currentTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
                     if (logsData?.list_items != null && logsData.list_items.Count > 0)//если есть события, то начинаю обработку
                     {
@@ -323,15 +326,32 @@ namespace Basip
                         // Обрабатываем все события НАЧИНАЯ С последнего timestamp
                         foreach (var logItem in logsData.list_items)
                         {
+                            var currentStr = DateTimeOffset.FromUnixTimeMilliseconds(currentTimestamp).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+                            var logItemStr = DateTimeOffset.FromUnixTimeMilliseconds(logItem.timestamp).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+                            var lastStr = DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+
+                            logger.LogDebug(
+                                "334 id_dev={IdDev} параметры события и времена обработки currentTimestamp={currentTimestamp}, logItemTimestamp={logItemTimestamp}, lastTimestamp={lastTimestamp}",
+                                dev.id_dev, currentStr, logItemStr, lastStr);
+
                             // Берем события с timestamp >= lastTimestamp
                             if (logItem.timestamp >= lastTimestamp)
                             {
                                 if (logItem.timestamp > maxTimestamp)
                                 {
-                                    maxTimestamp = logItem.timestamp;//собираю максимальную метку времени, т.к. нет гарантии, что события идут последовательно.
+                                    if (logItem.timestamp > currentTimestamp)
+                                    {
+                                        //метка времени превышает текущее время
+                                        logger.LogDebug("336 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem));
+
+                                    }
+                                    else
+                                    {
+                                        maxTimestamp = logItem.timestamp;//собираю максимальную метку времени, т.к. нет гарантии, что события идут последовательно.
+                                    }
                                 }
                                 // Для отладки можно вывести полный JSON
-                logger.LogDebug("293 id_dev={IdDev} IP: {BaseUrl} текст события LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem));
+                                logger.LogDebug("293 id_dev={IdDev} IP: {BaseUrl} текст события LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem));
                                 await ProcessLogEvent(dbForEvents, dev, logItem, currentDeviceId, majorVersion);//записываю событий в базу данных СКУД
                                 processedEventsCount++;//счетчик: сколько событий записано
                             }
