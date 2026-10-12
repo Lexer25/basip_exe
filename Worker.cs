@@ -342,7 +342,7 @@ namespace Basip
                                     if (logItem.timestamp > currentTimestamp)
                                     {
                                         //метка времени превышает текущее время
-                                        logger.LogDebug("336 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem));
+                                        logger.LogInformation("336 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem));
 
                                     }
                                     else
@@ -709,7 +709,8 @@ namespace Basip
                         id_eventtype: eventCode,
                         id_cntrl: dev.ctrl,
                         id_reader: 0,
-                        note: cardNumber == null ? note : $"{note}, Card={cardNumber}",
+                        //note: cardNumber == null ? note : $"{note}, Card={cardNumber}",
+                        note: cardNumber,
                         time: dateTime,
                         id_video: null,
                         id_user: null,
