@@ -1,11 +1,11 @@
 [Setup]
 AppName=Basip Key Service
-AppVersion=1.0.13
+AppVersion=2.0.3.4
 AppPublisher=ООО "Артсек"
 DefaultDirName={commonpf}\Basip Key Service
 DefaultGroupName=Basip Key Service
 OutputDir=Output
-OutputBaseFilename=BasipKeyServiceSetup_v1.0.13
+OutputBaseFilename=BasipKeyServiceSetup_v2.0.3.4
 Compression=lzma2/max
 SolidCompression=yes
 PrivilegesRequired=admin
@@ -13,10 +13,11 @@ WizardStyle=modern
 DisableWelcomePage=no
 DisableDirPage=no
 DisableProgramGroupPage=no
-VersionInfoVersion=1.0.13
+VersionInfoVersion=2.0.3.4
 VersionInfoCompany=ООО "Артсек"
 VersionInfoDescription=Service for working with Bas-IP devices
 VersionInfoProductName=Basip Key Service
+VersionInfoProductVersion=2.0.3.4
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -34,22 +35,24 @@ Name: "shortcuts"; Description: "Ярлыки в меню Пуск"; Types: full
 [Files]
 ; Основное приложение (единый исполняемый файл)
 Source: "publish\win-x64\basipkeysservices.exe"; DestDir: "{app}"; Flags: ignoreversion; Components: main
-Source: "publish\win-x64\appsettings.json"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist; Components: main
-Source: "publish\win-x64\appsettings.Development.json"; DestDir: "{app}"; Flags: ignoreversion onlyifdoesntexist; Components: main
+; appsettings.json НЕ помечен onlyifdoesntexist: при обновлении версии конфигурация обновляется,
+; строка подключения к БД хранится отдельно и не перезаписывается (см. README).
+Source: "publish\win-x64\appsettings.json"; DestDir: "{app}"; Flags: ignoreversion; Components: main
 
 [Icons]
 Name: "{group}\Basip Key Service"; Filename: "{app}\basipkeysservices.exe"; Components: shortcuts
-Name: "{group}\Просмотр логов"; Filename: "{win}\notepad.exe"; Parameters: "{app}\logs\app.log"; Components: shortcuts
+; Журнал пишется в C:\ProgramData\Basip\ArtonitBasIpTools.log (см. LogFolerPath в appsettings.json)
+Name: "{group}\Просмотр логов"; Filename: "{win}\notepad.exe"; Parameters: "{commonappdata}\Basip\ArtonitBasIpTools.log"; Components: shortcuts
 Name: "{group}\Удаление Basip Service"; Filename: "{uninstallexe}"; Components: shortcuts
 
 [Run]
 ; Установка службы (только если выбран компонент service)
 Filename: "sc"; Parameters: "create ""Basip Key Service"" binPath= ""{app}\basipkeysservices.exe"" start= auto DisplayName= ""Basip Key Service"""; Flags: runhidden waituntilterminated; StatusMsg: "Установка службы Windows..."; Components: service
-Filename: "sc"; Parameters: "description ""Basip Key Service"" ""Service for working with Bas-IP devices. Version 1.0.13"""; Flags: runhidden waituntilterminated; Components: service
+Filename: "sc"; Parameters: "description ""Basip Key Service"" ""Service for working with Bas-IP devices. Version 2.0.3.4"""; Flags: runhidden waituntilterminated; Components: service
 Filename: "sc"; Parameters: "start ""Basip Key Service"""; Flags: runhidden waituntilterminated; StatusMsg: "Запуск службы..."; Components: service
 
 ; Создание папки для логов
-Filename: "{cmd}"; Parameters: "/c if not exist ""{app}\logs"" mkdir ""{app}\logs"""; Flags: runhidden waituntilterminated
+Filename: "{cmd}"; Parameters: "/c if not exist ""{commonappdata}\Basip"" mkdir ""{commonappdata}\Basip"""; Flags: runhidden waituntilterminated
 
 [UninstallRun]
 Filename: "sc"; Parameters: "stop ""Basip Key Service"""; Flags: runhidden waituntilterminated
@@ -104,11 +107,14 @@ begin
   if CurStep = ssPostInstall then
   begin
     MsgBox('Установка Basip Key Service завершена успешно!' + #13#10 + #13#10 + 
-           'Версия: 1.0.13' + #13#10 +
+           'Версия: 2.0.3.4' + #13#10 +
            'Исполняемый файл: basipkeysservices.exe' + #13#10 + #13#10 +
            'Служба "Basip Key Service" установлена и запущена.' + #13#10 +
-           'Логи будут сохраняться в: {app}\logs\app.log' + #13#10 +
-           'Конфигурация: {app}\appsettings.json', 
+           'Логи будут сохраняться в: {commonappdata}\Basip\ArtonitBasIpTools.log' + #13#10 +
+           'Конфигурация: {app}\appsettings.json' + #13#10 + #13#10 +
+           'ВАЖНО: если параметр Service:db_config в appsettings.json пуст, ' +
+           'служба не сможет подключиться к базе данных. Заполните строку подключения ' +
+           'и перезапустите службу.', 
            mbInformation, MB_OK);
   end;
 end;

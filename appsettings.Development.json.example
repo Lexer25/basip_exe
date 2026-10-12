@@ -1,0 +1,13 @@
+{
+  "Logging": {
+    "LogLevel": {
+      "Default": "Information",
+      "Microsoft.Hosting.Lifetime": "Information"
+    }
+  },
+  "Service": {
+    //Шаблон для локального запуска. Скопируйте этот файл в appsettings.Development.json
+    //и укажите свою строку подключения к тестовой базе Firebird.
+    "db_config": "User=SYSDBA;Password=temp;Database=D:\\Path\\To\\shieldpro_rest.gdb;DataSource=127.0.0.1;Port=3050;Pooling=True;MinPoolSize=2;MaxPoolSize=50;ConnectionLifetime=300;"
+  }
+}

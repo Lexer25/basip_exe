@@ -1,8 +1,5 @@
-﻿using FirebirdSql.Data.FirebirdClient;
 using Microsoft.Extensions.Logging;
 using RestSharp;
-using Serilog.Core;
-using Serilog.Events;
 using System.Data;
 using System.Diagnostics;
 using System.Net;
@@ -16,26 +13,62 @@ namespace Basip
     {
         public readonly ILogger logger;
         private WorkerOptions options;
+        private readonly IHostApplicationLifetime lifetime;
         public TimeSpan timeout;
         public TimeSpan timestart;
         public TimeSpan deltasleep;
 
         private readonly string version;
 
-        public Worker(ILogger<Worker> logger, WorkerOptions options)
+        public Worker(ILogger<Worker> logger, WorkerOptions options, IHostApplicationLifetime lifetime)
         {
             this.logger = logger;
             this.options = options;
+            this.lifetime = lifetime;
 
             version = GetApplicationVersion();
 
-            var time = options.timeout.Split(':');
-            timeout = new TimeSpan(Int32.Parse(time[0]), Int32.Parse(time[1]), Int32.Parse(time[2]));
-            time = options.timeout.Split(':');
-            timestart = new TimeSpan(Int32.Parse(time[0]), Int32.Parse(time[1]), Int32.Parse(time[2]));
+            // Интервал опроса разбирается так же безопасно, как и timestart:
+            // кривое значение в конфиге больше не роняет конструктор службы.
+            if (!TryParseTime(options.timeout, out timeout) || timeout <= TimeSpan.Zero)
+            {
+                logger.LogError($"32 Некорректное значение timeout = \"{options.timeout}\", используется 00:00:10");
+                timeout = TimeSpan.FromSeconds(10);
+            }
+
+            // Раньше здесь повторно разбирался options.timeout, из-за чего timestart
+            // всегда совпадал с интервалом опроса, а значение из конфигурации игнорировалось.
+            if (!TryParseTime(options.timestart, out timestart))
+            {
+                logger.LogError($"35 Некорректное значение timestart = \"{options.timestart}\", используется 00:00:00");
+                timestart = TimeSpan.Zero;
+            }
+
             var now = new TimeSpan(DateTime.Now.TimeOfDay.Hours, DateTime.Now.TimeOfDay.Minutes, DateTime.Now.TimeOfDay.Seconds);
             deltasleep = (options.run_now) ? TimeSpan.Zero :
                 (timestart >= now) ? timestart - now : timestart - now + new TimeSpan(1, 0, 0, 0);
+        }
+
+        // Разбор строки вида "Ч:ММ:СС" без исключения на некорректном значении
+        private static bool TryParseTime(string? value, out TimeSpan result)
+        {
+            result = TimeSpan.Zero;
+            if (string.IsNullOrWhiteSpace(value)) return false;
+
+            var parts = value.Split(':');
+            if (parts.Length != 3) return false;
+
+            if (!int.TryParse(parts[0], out int hours) ||
+                !int.TryParse(parts[1], out int minutes) ||
+                !int.TryParse(parts[2], out int seconds))
+            {
+                return false;
+            }
+
+            if (hours < 0 || minutes < 0 || seconds < 0) return false;
+
+            result = new TimeSpan(hours, minutes, seconds);
+            return true;
         }
 
         // Получение версии приложения
@@ -43,18 +76,19 @@ namespace Basip
         {
             try
             {
+                // AssemblyVersion — основной источник (задаётся в Basip.csproj)
                 var assembly = Assembly.GetExecutingAssembly();
-
-
-                // 2. AssemblyVersion (стандартный способ)
                 var version = assembly.GetName().Version?.ToString();
                 if (!string.IsNullOrEmpty(version) && version != "0.0.0.0")
                     return version;
 
-                // 3. Из файла сборки
-                if (!string.IsNullOrEmpty(assembly.Location))
+                // Резерв: версия из самого exe-файла.
+                // Assembly.Location в однофайловой сборке всегда пуст (IL3000), поэтому
+                // путь берём через Environment.ProcessPath — иначе эта ветка не работала.
+                string? exePath = Environment.ProcessPath;
+                if (!string.IsNullOrEmpty(exePath))
                 {
-                    var fileInfo = FileVersionInfo.GetVersionInfo(assembly.Location);
+                    var fileInfo = FileVersionInfo.GetVersionInfo(exePath);
                     if (!string.IsNullOrEmpty(fileInfo.ProductVersion))
                         return fileInfo.ProductVersion;
                     if (!string.IsNullOrEmpty(fileInfo.FileVersion))
@@ -74,24 +108,30 @@ namespace Basip
         {
             logger.LogInformation(@$"32 basip start: {timestart} deltasleep: {deltasleep}");
             logger.LogInformation(@$"33 Service basip write and delete card started");
-            await Task.Delay(deltasleep);
+
+            // Ожидание старта прерывается остановкой службы, иначе Task.Delay
+            // задерживал бы штатное завершение на весь deltasleep.
+            await Task.Delay(deltasleep, stoppingToken);
 
             // Выполняем инициализацию БД и получение устройств один раз при старте
-            DB db = null;
-            DataRowCollection devices = null;
+            DB db;
+            DataRowCollection devices;
 
             try
             {
                 logger.LogInformation($"84 Версия приложения basip: {version}");
 
                 // Создаем экземпляр DB с connection string
-                db = new DB(options.db_config, logger);
+                db = new DB(options.db_config ?? string.Empty, logger);
 
                 // Проверяем наличие обязательных таблиц
                 if (!db.CheckRequiredTables(logger))
                 {
                     logger.LogCritical("92 Служебные таблицы не найдены. Программа завершает работу.");
-                    Environment.Exit(1);
+                    // Штатная остановка хоста вместо Environment.Exit:
+                    // Environment.Exit убивал процесс и не давал хосту корректно завершиться.
+                    lifetime.StopApplication();
+                    return;
                 }
 
                 logger.LogInformation("97 Ok connect database");
@@ -104,7 +144,8 @@ namespace Basip
             {
                 logger.LogError("104 No connect database: " + options.db_config);
                 logger.LogError(e.ToString());
-                Environment.Exit(1);
+                lifetime.StopApplication();
+                return;
             }
 
             // Основной цикл, который будет выполняться периодически
@@ -136,7 +177,6 @@ namespace Basip
 
             DataRowCollection devices = db.GetDevice().Rows;
             List <Task> tasks = new List<Task>();
-            Stopwatch stopwatch = Stopwatch.StartNew();
 
             int validDevicesCount = 0;
             logger.LogInformation("70 Start async.");
@@ -151,7 +191,6 @@ namespace Basip
                         continue;
                     }
                     logger.LogDebug($"149-1  device ID {row["id_dev"]} IP {row["id_dev"]} is OK");
-                    Device device = new Device(row, options.time_wait_http);
                     validDevicesCount++;
                     logger.LogDebug($"149-2 start TaskGet ID {row["id_dev"]}");
                     tasks.Add(TaskGet(row, db));
@@ -174,8 +213,6 @@ namespace Basip
                 logger.LogInformation("172 No devices with valid IP addresses found");
                 return;
             }
-
-            Task.WaitAll(tasks.ToArray());
         }
 
         // Изменяем TaskGet, чтобы он принимал DB
@@ -186,7 +223,7 @@ namespace Basip
            
             Device dev = new Device(row, options.time_wait_http);
 
-            JsonDocument deviceInfo = await dev.GetInfo();
+            JsonDocument? deviceInfo = await dev.GetInfo();
             if (deviceInfo == null)
             {
                 logger.LogInformation($"192 id_dev={dev.id_dev} IP {dev.base_url} - нет связи. ");
@@ -194,34 +231,31 @@ namespace Basip
                 dbForEvents.SetOnlineState(currentDeviceId, 0);
                 return;
             }
-            
-            if (!await dev.Auth())
+
+            // Авторизация выполняется один раз: раньше сразу после этого шёл
+            // повторный вызов Auth(), то есть лишний HTTP-запрос на каждую панель за итерацию.
+            bool isAuthenticated = await dev.Auth();
+            if (!isAuthenticated)
             {
                 auth = "Auth ERR";
-                
-            }
-
-            // === НОВЫЙ КОД: Формирование STRVALUE ===
-            string strValue = BuildAboutString(deviceInfo, auth);
-            logger.LogInformation($"202 id_dev={dev.id_dev} Device d_dev={dev.id_dev} {currentDeviceId} ({dev.base_url})  STRVALUE for 'about': {strValue}");
-            // Записываем значенме в базу данных
-            dbForEvents.InsertAbout(currentDeviceId, strValue);
-            dbForEvents.SetOnlineState(currentDeviceId, 1);
-
-            // =======================================
-
-            if (!await dev.Auth())
-            {
-                logger.LogInformation($"211 id_dev={dev.id_dev} Device  {dev.base_url} auth failed");
+                logger.LogInformation($"211 id_dev={dev.id_dev} Device {dev.base_url} auth failed");
                 dbForEvents.FixDeviceErr("Auth ERR", currentDeviceId);
                 return;
             }
+
             if (!dev.is_online)
             {
                 logger.LogDebug($"216 id_dev={dev.id_dev} Device {dev.base_url} offline");
                 dbForEvents.FixDeviceErr("Devcice offline", currentDeviceId);
                 return;
             }
+
+            // Формирование STRVALUE для BAS_PARAM.ABOUT
+            string strValue = BuildAboutString(deviceInfo, auth);
+            logger.LogInformation($"202 id_dev={dev.id_dev} Device d_dev={dev.id_dev} {currentDeviceId} ({dev.base_url})  STRVALUE for 'about': {strValue}");
+            // Записываем значение в базу данных
+            dbForEvents.InsertAbout(currentDeviceId, strValue);
+            dbForEvents.SetOnlineState(currentDeviceId, 1);
 
            // string firmwareVersion = "unknown";
             string _apiVersion = "unknown";
@@ -245,8 +279,9 @@ namespace Basip
 
             logger.LogInformation($"240 id_dev={dev.id_dev} Device {dev.base_url} apiVersion: {_apiVersion}, major: {major}, middle: {middle}");
 
-            //контроле версии API. С версиями 3.Х и выше не работаем
-            if (major > 3 || (major == 3 && middle > 00))
+            // Контроль версии API. С версиями 3.0 и выше не работаем.
+            // Раньше условие было (major == 3 && middle > 0), поэтому 3.0 проходила как разрешённая.
+            if (major >= 3)
             {
                 logger.LogWarning($"245 id_dev={dev.id_dev} Device {dev.base_url} apiVersion version {_apiVersion} is higher than allowed (3.x). Stopping work with this panel.");
                 return;
@@ -255,8 +290,9 @@ namespace Basip
             // Используем переданный dbForEvents вместо создания нового
             try
             {
-                string apiVersion = deviceInfo.RootElement.GetProperty("api_version").ToString();
-                int majorVersion = int.Parse(apiVersion.Split('.')[0]);
+                // major уже разобран выше из того же поля api_version
+                int majorVersion = major;
+                logger.LogDebug($"288 id_dev={dev.id_dev} major api для обработки событий = {majorVersion}");
 
                 long lastTimestamp = dbForEvents.GetLastEventID(currentDeviceId);
                 // Если нет сохраненного timestamp, берем время 1 час назад
@@ -295,8 +331,8 @@ namespace Basip
                                     maxTimestamp = logItem.timestamp;//собираю максимальную метку времени, т.к. нет гарантии, что события идут последовательно.
                                 }
                                 // Для отладки можно вывести полный JSON
-                logger.LogDebug("293 id_dev={dev.id_dev} IP: {dev.base_url} текст события LogItem: {LogItem}", JsonSerializer.Serialize(logItem));
-                                await ProcessLogEvent(dbForEvents, dev, logItem, currentDeviceId, deviceInfo);//записываю событий в базу данных СКУД
+                logger.LogDebug("293 id_dev={IdDev} IP: {BaseUrl} текст события LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem));
+                                await ProcessLogEvent(dbForEvents, dev, logItem, currentDeviceId, majorVersion);//записываю событий в базу данных СКУД
                                 processedEventsCount++;//счетчик: сколько событий записано
                             }
                             else
@@ -349,7 +385,7 @@ namespace Basip
             }
 
             // ОБРАБОТКА КАРТ: создаем новый экземпляр DB для работы с картами
-            DB dbForCards = new DB(options.db_config, logger);
+            DB dbForCards = new DB(options.db_config ?? string.Empty, logger);
 
             try
             {
@@ -365,7 +401,7 @@ namespace Basip
                             break;
 
                         case 2: // Удаление карты
-                            await ProcessCardDelete(dbForCards, dev, card, currentDeviceId, deviceInfo);
+                            await ProcessCardDelete(dbForCards, dev, card, currentDeviceId, major);
                             break;
                     }
                 }
@@ -378,7 +414,7 @@ namespace Basip
 
         private async Task ProcessCardWrite(DB db, Device dev, DataRow card, int deviceId)
         {
-            string cardId = card["id_card"].ToString();
+            string cardId = GetCardId(card);
             logger.LogInformation($@"369 Command destination: writekey id_dev={deviceId} BASE_URL {dev.base_url} key=""{options.uidtransform(cardId)}"" AddCard ");
 
             RestResponse request = await dev.AddIdentifier(options.uidtransform(cardId), "card");
@@ -415,7 +451,7 @@ namespace Basip
         {
             try
             {
-                var uid = JsonDocument.Parse(request.Content).RootElement.GetProperty("uid").ToString();
+                var uid = JsonDocument.Parse(request.Content!).RootElement.GetProperty("uid").ToString();
                 logger.LogInformation($@"412 Answer destination: writekey id_dev={deviceId} BASE_URL {dev.base_url} Answer: OK key=""{options.uidtransform(cardId)}"" uid={uid}");
 
                 int uidInt = 0;
@@ -499,61 +535,68 @@ namespace Basip
             }
         }
 
-        private async Task ProcessCardDelete(DB db, Device dev, DataRow card, int deviceId, JsonDocument deviceInfo)
+        private async Task ProcessCardDelete(DB db, Device dev, DataRow card, int deviceId, int majorVersion)
         {
-            string cardId = card["id_card"].ToString();
+            string cardId = GetCardId(card);
             string delcommandlog = $@"deletekey id_dev ={deviceId} BASE_URL {dev.base_url} key = ""{options.uidtransform(cardId)}""";
 
-            string apiVersion = deviceInfo.RootElement.GetProperty("api_version").ToString();
-            int majorVersion = int.Parse(apiVersion.Split('.')[0]);
-
-            logger.LogInformation("503 "+delcommandlog + "GetInfoCard " + "api_version=\"" + apiVersion + "\"");
+            logger.LogInformation("503 "+delcommandlog + "GetInfoCard " + "major api=\"" + majorVersion + "\"");
 
             RestResponse? content = await dev.GetInfoCard(options.uidtransform(cardId), majorVersion);
 
             switch (content.StatusCode)
             {
                 case HttpStatusCode.OK:
-                    JsonDocument jsonDoc = JsonDocument.Parse(content.Content);
-                    JsonElement.ArrayEnumerator jsonlist = jsonDoc.RootElement.GetProperty("list_items").EnumerateArray();
-
-                    /*logger.LogDebug($"{delcommandlog} Получен ответ от устройства c мажорной версией api = {majorVersion}: {content.Content}");*/
-
-                    // Ищем точное совпадение номера карты
-                    string uidToDelete = null;
-                    foreach (JsonElement element in jsonlist)
+                    using (JsonDocument jsonDoc = JsonDocument.Parse(content.Content!))
                     {
-                        if (element.GetProperty("identifier_number").ToString() == options.uidtransform(cardId))
+                        // list_items может отсутствовать в ответе: GetProperty в этом случае
+                        // выбрасывал KeyNotFoundException и карта оставалась в очереди навсегда.
+                        if (!jsonDoc.RootElement.TryGetProperty("list_items", out JsonElement listItems) ||
+                            listItems.ValueKind != JsonValueKind.Array)
                         {
-                            uidToDelete = element.GetProperty("identifier_uid").ToString();
-                            break;
+                            logger.LogWarning($"547 {delcommandlog} Answer: ERR no list_items in response");
+                            db.UpdateCardInDevIncrement((int)card["id_cardindev"]);
+                            return;
                         }
-                    }
 
-                    if (uidToDelete != null)
-                    {
-                        logger.LogInformation($"528 {delcommandlog}" + $@" для карты {cardId} uid ={uidToDelete} DeleteCard major api = {majorVersion}");
-
-                        var status = (await dev.DeleteCard(uidToDelete)).StatusCode;
-
-                        switch (status)
+                        // Ищем точное совпадение номера карты
+                        string? uidToDelete = null;
+                        foreach (JsonElement element in listItems.EnumerateArray())
                         {
-                            case HttpStatusCode.OK:
-                                logger.LogDebug($@"535 {delcommandlog}   Answer: OK uid={uidToDelete}");
-                                db.DeleteCardInDev((int)card["id_cardindev"]);
-                                logger.LogInformation($"537 Card {cardId} successfully processed and removed from queue for device {deviceId}");
+                            if (element.TryGetProperty("identifier_number", out JsonElement number) &&
+                                number.ToString() == options.uidtransform(cardId) &&
+                                element.TryGetProperty("identifier_uid", out JsonElement uidElement))
+                            {
+                                uidToDelete = uidElement.ToString();
                                 break;
-                            default:
-                                logger.LogDebug($@"540 Answer destination: {delcommandlog} Answer: ERR uid={uidToDelete} no delete");
-                                db.UpdateCardInDevIncrement((int)card["id_cardindev"]);
-                                break;
+                            }
                         }
-                    }
-                    else
-                    {
-                        logger.LogDebug($@"547 {delcommandlog} Answer: OK no card in panel");
-                        db.DeleteCardInDev((int)card["id_cardindev"]);
-                        logger.LogInformation($"Card {cardId} successfully processed and removed from queue for device {deviceId}");
+
+                        if (uidToDelete != null)
+                        {
+                            logger.LogInformation($"528 {delcommandlog}" + $@" для карты {cardId} uid ={uidToDelete} DeleteCard major api = {majorVersion}");
+
+                            var status = (await dev.DeleteCard(uidToDelete)).StatusCode;
+
+                            switch (status)
+                            {
+                                case HttpStatusCode.OK:
+                                    logger.LogDebug($@"535 {delcommandlog}   Answer: OK uid={uidToDelete}");
+                                    db.DeleteCardInDev((int)card["id_cardindev"]);
+                                    logger.LogInformation($"537 Card {cardId} successfully processed and removed from queue for device {deviceId}");
+                                    break;
+                                default:
+                                    logger.LogDebug($@"540 Answer destination: {delcommandlog} Answer: ERR uid={uidToDelete} no delete");
+                                    db.UpdateCardInDevIncrement((int)card["id_cardindev"]);
+                                    break;
+                            }
+                        }
+                        else
+                        {
+                            logger.LogDebug($@"547 {delcommandlog} Answer: OK no card in panel");
+                            db.DeleteCardInDev((int)card["id_cardindev"]);
+                            logger.LogInformation($"Card {cardId} successfully processed and removed from queue for device {deviceId}");
+                        }
                     }
                     break;
 
@@ -563,46 +606,6 @@ namespace Basip
                     break;
             }
         }
-
-
-        // Добавь это поле в класс (например, Dictionary для маппинга событий)
-        private static Dictionary<string, int> _eventTypeMapping;
-
-        // Метод для инициализации маппинга из таблицы eventtype
-        private void InitializeEventTypeMapping(DB db)
-        {
-            if (_eventTypeMapping != null) return;
-
-            _eventTypeMapping = new Dictionary<string, int>();
-
-            // Здесь нужно загрузить данные из таблицы eventtype
-            // Предполагаю, что у тебя есть метод для получения всех eventtype из БД
-            var eventTypes = db.GetAllEventTypes(); // Тебе нужно реализовать этот метод
-
-            foreach (var eventType in eventTypes)
-            {
-                // Сопоставляем NAME из таблицы eventtype с ключами событий
-                // Нужно преобразовать NAME в формат, который используется в logEvent.name.key
-                string key = ConvertNameToKey(eventType.Name);
-                if (!string.IsNullOrEmpty(key))
-                {
-                    _eventTypeMapping[key] = eventType.Id;
-                }
-            }
-        }
-
-        // Вспомогательный метод для преобразования NAME в ключ события
-        private string ConvertNameToKey(string eventName)
-        {
-            return eventName?.ToLower()
-                .Replace(" ", "_")
-                .Replace("ё", "е")
-                .Replace("неизвестная_карточка", "access_denied_by_unknown_card")
-                .Replace("действительная_карточка", "access_granted_by_valid_identifier")
-                // Добавь другие преобразования по необходимости
-                ?? string.Empty;
-        }
-
         private string BuildAboutString(JsonDocument deviceInfo, string auth)
         {
             if (deviceInfo == null)
@@ -640,29 +643,23 @@ namespace Basip
         }
         
         //процедура выборки событий из панели
-        private async Task ProcessLogEvent(DB db, Device dev, LogItem logEvent, int deviceId, JsonDocument deviceInfo)
+        private async Task ProcessLogEvent(DB db, Device dev, LogItem logEvent, int deviceId, int majorVersion)
         {
 
             try
             {
-                string apiVersion = deviceInfo.RootElement.GetProperty("api_version").ToString();
-                int majorVersion = int.Parse(apiVersion.Split('.')[0]);
-
-                string cardNumber = null;
+                string? cardNumber = null;
                 if (logEvent.info?.model != null)
-
-
                 {
                     // Пробуем разные ключи, которые могут содержать номер карты
-                    if (logEvent.info.model.ContainsKey("card"))
+                    if (logEvent.info.model.TryGetValue("card", out object? cardValue) && cardValue != null)
                     {
-                        cardNumber = logEvent.info.model["card"]?.ToString();
+                        cardNumber = cardValue.ToString();
                     }
-                    else if (logEvent.info.model.ContainsKey("number"))
+                    else if (logEvent.info.model.TryGetValue("number", out object? numberValue) && numberValue != null)
                     {
-                        cardNumber = logEvent.info.model["number"]?.ToString();
+                        cardNumber = numberValue.ToString();
                     }
-
                 }
 
                 // ПРАВИЛЬНЫЕ КОДЫ СОБЫТИЙ
@@ -676,22 +673,23 @@ namespace Basip
                 //// Тип события для информации
 
                 string eventType = logEvent.name?.key ?? "Unknown";
-                //DateTime dateTime = DateTimeOffset.FromUnixTimeMilliseconds(logEvent.timestamp).DateTime;
                 DateTime dateTime = DateTimeOffset.FromUnixTimeMilliseconds(logEvent.timestamp).LocalDateTime;
                
                 string note = $"Device=\"{dev.name}\", Type={eventType} " +
                               $"Readdate=#{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}# " +
-                              $"DeviceDate =#{dateTime:yyyy-MM-dd HH:mm:ss}# " + // <-- явный формат + UTC
+                              $"DeviceDate =#{dateTime:yyyy-MM-dd HH:mm:ss}# " +
                               $"RowDeviceDate = {logEvent.timestamp}";
 
                 if (eventCode > 0)
                 {
+                    // В БД уходит сформированная строка note, а не только номер карты:
+                    // до этой правки переменная note использовалась лишь в логе.
                     int? insertedEventTypeId = db.EventInsert(
                         id_db: 1,
                         id_eventtype: eventCode,
                         id_cntrl: dev.ctrl,
                         id_reader: 0,
-                        note: cardNumber,
+                        note: cardNumber == null ? note : $"{note}, Card={cardNumber}",
                         time: dateTime,
                         id_video: null,
                         id_user: null,
@@ -701,22 +699,17 @@ namespace Basip
                         idserverts: logEvent.timestamp
                     );
 
+                    int insertedId = insertedEventTypeId ?? 0;
+
                     if (eventType != "successful_login_api_call")
                     {
-                        if (majorVersion == 1 || majorVersion == 2)
+                        if (cardNumber != null)
                         {
-                            if (cardNumber != null)
-                            {
-                                logger.LogInformation($"+{note}, Card={cardNumber}, EventType={eventCode}, Id_Event={insertedEventTypeId.Value},  major api = {majorVersion}");
-                            }
-                            else
-                            {
-                                logger.LogInformation($"+{note}, EventType={eventCode}, Id_Event={insertedEventTypeId.Value}, major api = {majorVersion}");
-                            }
+                            logger.LogInformation($"+{note}, Card={cardNumber}, EventType={eventCode}, Id_Event={insertedId},  major api = {majorVersion}");
                         }
                         else
                         {
-                            logger.LogCritical($"712 Not implemented with major api = {majorVersion}");
+                            logger.LogInformation($"+{note}, EventType={eventCode}, Id_Event={insertedId}, major api = {majorVersion}");
                         }
                     }
 
@@ -735,6 +728,13 @@ namespace Basip
             {
                 logger.LogError($"729 Error: {ex.Message}");
             }
+        }
+
+        // Номер карты из строки очереди. Раньше здесь был прямой ToString(),
+        // который на DBNull давал null и приводил к риску NullReference.
+        private static string GetCardId(DataRow card)
+        {
+            return card["id_card"] == DBNull.Value ? string.Empty : card["id_card"].ToString() ?? string.Empty;
         }
     }
 }

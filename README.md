@@ -1,10 +1,13 @@
 ИНСТРУКЦИЯ К ПРОГРАММЕ BAS-IP TOOLS SERVICE
 Дата: 27.10.2025 
-Выполнил: Дмитриев Срегей Витальевич
+Выполнил: Дмитриев Сергей Витальевич
 
 # 1. НАЗНАЧЕНИЕ И КРАТКОЕ ОПИСАНИЕ РАБОТЫ ПРОГРАММЫ
 
 basip keys services - это Windows-сервис для интеграции СКУД системы с панелями управления Bas-IP.
+
+Текущая версия приложения: 2.0.3.4 (задаётся в Basip.csproj и попадает в журнал строкой
+"Версия приложения basip: ..."). Версия установщика совпадает с версией приложения.
 
 Основные возможности:
 - Синхронизация карт доступа - запись и удаление карт на панелях Bas-IP
@@ -21,12 +24,15 @@ basip keys services - это Windows-сервис для интеграции С
 - access_granted_by_valid_identifier - доступ разрешен (код 50)
 - access_denied_by_unknown_card - доступ запрещен (код 46)
 
+Поддерживаемые версии API панелей: 1.x и 2.x. Панели с API 3.0 и выше не обслуживаются -
+служба пишет предупреждение в журнал и пропускает такую панель.
+
 
 # 2. УСТАНОВКА
 
 Требования к системе:
 - ОС: Windows 7/8/10/11 или Windows Server
-- .NET: Runtime 6.0 или выше
+- .NET: Runtime 8.0 или выше (целевая платформа проекта - net8.0)
 - База данных: Firebird SQL
 - Сеть: Доступ к панелям Bas-IP по HTTP
 
@@ -39,22 +45,40 @@ basip keys services - это Windows-сервис для интеграции С
      * CARDINDEV
      * CARD
      * CARDIDX
+   - Используется хранимая процедура DEVICEEVENTS_INSERT
 
 2. Настройка конфигурации:
    - Отредактируйте файл appsettings.json
-   - Настройте параметры подключения к БД
-   - Укажите параметры работы службы
+   - ОБЯЗАТЕЛЬНО заполните параметр Service:db_config (строка подключения к БД).
+     В репозитории он пуст: строка подключения и пароль не хранятся в системе контроля версий.
+   - Укажите остальные параметры работы службы
 
-3. Установка как службы Windows:
+3. Сборка и установка (рекомендуемый способ):
+   Запустите build.bat - он восстановит пакеты, опубликует приложение
+   в publish\win-x64 и соберёт установщик Output\BasipKeyServiceSetup_v2.0.3.4.exe.
+   Установщик сам регистрирует службу с именем "Basip Key Service".
+
+   Результат сборки - один файл publish\win-x64\basipkeysservices.exe размером ~5 МБ.
+   На целевой машине должен быть установлен .NET Runtime 8.0 (Microsoft.NETCore.App 8.x),
+   иначе exe не запустится. Рядом с exe обязателен appsettings.json.
+
+   Если нужен файл, не зависящий от установленного рантайма, соберите самодостаточный
+   вариант (34 МБ со сжатием, 67 МБ без):
+   dotnet publish Basip.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeAllContentForSelfExtract=true -p:EnableCompressionInSingleFile=true -o publish\win-x64
+
+   Публикация через профиль (тот же результат, что у build.bat):
+   dotnet publish Basip.csproj -p:PublishProfile=SingleFile
+
+   Альтернатива - вручную:
    # Публикация приложения
-   dotnet publish -c Release -o "C:\Program Files\BasipService"
+   dotnet publish -c Release -o "C:\Program Files\Basip Key Service"
 
    # Установка службы
-   sc create "BasipService" binPath="C:\Program Files\BasipService\Basip.exe"
-   sc description "BasipService" "Bas-IP Integration Service"
+   sc create "Basip Key Service" binPath="C:\Program Files\Basip Key Service\basipkeysservices.exe"
+   sc description "Basip Key Service" "Bas-IP Integration Service"
 
 4. Запуск службы:
-   sc start BasipService
+   sc start "Basip Key Service"
 
 
 # 3. НАСТРОЙКА
@@ -73,7 +97,7 @@ basip keys services - это Windows-сервис для интеграции С
     "retainedFileCountLimit": 7
   },
   "Service": {
-    "db_config": "User=SYSDBA;Password=temp;Database=C:\\Path\\To\\Database.GDB;DataSource=127.0.0.1;Port=3050;",
+    "db_config": "User=SYSDBA;Password=<пароль>;Database=C:\\Path\\To\\Database.GDB;DataSource=127.0.0.1;Port=3050;",
     "format_card_uid": 2,
     "run_now": true,
     "timestart": "9:10:0",
@@ -86,20 +110,29 @@ basip keys services - это Windows-сервис для интеграции С
 Параметры настройки:
 
 Раздел "Service":
-- db_config - строка подключения к Firebird базе данных
+- db_config - строка подключения к Firebird базе данных (в репозитории не хранится)
 - format_card_uid - формат идентификатора карты:
   * 0 - HEX 8 byte (00124CD8)
   * 2 - DEC 10 digit (0001493650)
 - run_now - запуск сразу после старта (true/false)
-- timestart - время первого запуска (ЧЧ:ММ:СС)
+- timestart - время первого запуска (ЧЧ:ММ:СС). Если run_now=false и текущее время
+  меньше timestart, служба ждёт до этого времени; если больше - до этого времени следующих суток
 - timeout - интервал между опросами (ЧЧ:ММ:СС)
 - time_wait_http - таймаут HTTP запросов (секунды)
 - clear_log - очистка журнала событий на панелях после обработки
 
 Раздел "Log":
-- LogFolerPath - путь к каталогу логов
-- LogLevel - уровень детализации логов
+- LogFolerPath - путь к каталогу логов (имя параметра оставлено как в коде)
+- LogLevel - уровень детализации файлового журнала
 - retainedFileCountLimit - количество хранимых файлов логов
+
+Раздел "Logging":
+- LogLevel:Default - уровень вывода в консоль
+
+Где хранить строку подключения:
+- На стенде заказчика: прямо в appsettings.json рядом со службой.
+- При локальной разработке: в appsettings.Development.json (файл в .gitignore,
+  в репозиторий не попадает). Образец - appsettings.Development.json.example.
 
 Настройка устройств в базе данных:
 
@@ -111,6 +144,9 @@ basip keys services - это Windows-сервис для интеграции С
    - LOGIN - логин для авторизации
    - PASS - пароль для авторизации
    - LASTEVENT - временная метка последнего обработанного события
+   - ABOUT - строка с моделью, версиями ПО и результатом авторизации
+   - ONLINE - признак связи с панелью: 1 - есть связь, 0 - нет
+
 
 # 4. КОНТРОЛЬ РАБОТЫ ПРИЛОЖЕНИЯ (ПОЯСНЕНИЯ К ЛОГАМ)
 
@@ -185,5 +221,6 @@ Failed to get events. Status: Unauthorized
 
 3. События не обрабатываются:
    - Проверить параметр clear_log
-   - Проверить временные метки в BAS_PARAM
+   - Проверить временные метки в BAS_PARAM (LASTEVENT)
    - Проверить коды событий в логах панелей
+   - Помнить: панели с API 3.0 и выше не обслуживаются

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk.Worker">
+<Project Sdk="Microsoft.NET.Sdk.Worker">
 
   <PropertyGroup>
     <LangVersion>preview</LangVersion>
@@ -6,20 +6,27 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UserSecretsId>dotnet-Basip-cb8c693b-e5ee-4fcf-9faa-8403bced6feb</UserSecretsId>
-    <AssemblyVersion>2.0.3.3</AssemblyVersion>
-    <FileVersion>2.0.3.3</FileVersion>
+    <Version>2.0.3.4</Version>
+    <AssemblyVersion>2.0.3.4</AssemblyVersion>
+    <FileVersion>2.0.3.4</FileVersion>
+    <InformationalVersion>2.0.3.4</InformationalVersion>
+    <ProductVersion>2.0.3.4</ProductVersion>
     <AssemblyName>basipkeysservices</AssemblyName>
   </PropertyGroup>
 
   <ItemGroup>
-    <Reference Include="basipCtrl">
-      <HintPath>.\libs\basip_ctrl.dll</HintPath>
-      <Private>True</Private>
-    </Reference>
 	<PackageReference Include="FirebirdSql.Data.FirebirdClient" Version="10.3.2" />
         <PackageReference Include="Microsoft.Extensions.Hosting" Version="9.0.2" />
 	<PackageReference Include="Microsoft.Extensions.Hosting.WindowsServices" Version="9.0.2" />
 	<PackageReference Include="RestSharp" Version="112.1.0" />
 	<PackageReference Include="Serilog.Extensions.Logging.File" Version="3.0.0" />
+  </ItemGroup>
+
+  <!-- appsettings.Development.json содержит отладочную строку подключения.
+       В поставку он попадать не должен: иначе на стенде он переопределит боевой
+       appsettings.json, если служба запустится в окружении Development. -->
+  <ItemGroup>
+    <Content Update="appsettings.Development.json" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
+    <Content Update="appsettings.Development.json.example" CopyToOutputDirectory="Never" CopyToPublishDirectory="Never" />
   </ItemGroup>
 </Project>

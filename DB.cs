@@ -1,7 +1,3 @@
-﻿using FirebirdSql.Data.FirebirdClient;
-using System.Data;
-using static System.Runtime.InteropServices.JavaScript.JSType;
-
 using FirebirdSql.Data.FirebirdClient;
 using System.Data;
 using System.Text.RegularExpressions;
@@ -10,7 +6,6 @@ public class DB
 {
     private readonly string _connectionString;
     private readonly ILogger? _logger;
-    private bool _connectionValidated = false;
 
     public DB(string connectionString, ILogger? logger = null)
     {
@@ -42,17 +37,22 @@ public class DB
             connectionString = fixedString;
         }
 
-        // 3. Проверяем наличие обязательных параметров
-        var requiredParams = new[] { "User", "Password", "Database", "DataSource" };
-        var missingParams = new List<string>();
-
-        foreach (var param in requiredParams)
+        // 3. Проверяем наличие обязательных параметров.
+        // Разбираем строку на пары "ключ=значение", а не ищем подстроку:
+        // поиск подстроки давал ложные срабатывания (например "User" находится в "Username").
+        var presentParams = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var pair in connectionString.Split(';', StringSplitOptions.RemoveEmptyEntries))
         {
-            if (!connectionString.Contains(param, StringComparison.OrdinalIgnoreCase))
+            int eq = pair.IndexOf('=');
+            if (eq > 0)
             {
-                missingParams.Add(param);
+                presentParams.Add(pair.Substring(0, eq).Trim());
             }
         }
+
+        var missingParams = new[] { "User", "Password", "Database", "DataSource" }
+            .Where(p => !presentParams.Contains(p))
+            .ToList();
 
         if (missingParams.Any())
         {
@@ -89,18 +89,12 @@ public class DB
         {
             string errorDetails = DecodeFirebirdError(fbEx, connectionString);
 
-            _logger?.LogCritical(
-                "================================================================================"
-            );
-            _logger?.LogCritical("DATABASE CONNECTION FAILED!");
-            _logger?.LogCritical("{ErrorDetails}", errorDetails);
-            _logger?.LogCritical(
-                "================================================================================"
-            );
-            _logger?.LogCritical("Connection string: {ConnectionString}", connectionString);
-            _logger?.LogCritical(
-                "================================================================================"
-            );
+            _logger?.LogError("================================================================================");
+            _logger?.LogError("DATABASE CONNECTION FAILED!");
+            _logger?.LogError("{ErrorDetails}", errorDetails);
+            _logger?.LogError("================================================================================");
+            _logger?.LogError("Connection string: {ConnectionString}", connectionString);
+            _logger?.LogError("================================================================================");
 
             throw new InvalidOperationException(
                 $"Cannot connect to database: {fbEx.Message}",
@@ -109,18 +103,12 @@ public class DB
         }
         catch (Exception ex)
         {
-            _logger?.LogCritical(
-                "================================================================================"
-            );
-            _logger?.LogCritical("DATABASE CONNECTION FAILED!");
-            _logger?.LogCritical("Error: {Error}", ex.Message);
-            _logger?.LogCritical(
-                "================================================================================"
-            );
-            _logger?.LogCritical("Connection string: {ConnectionString}", connectionString);
-            _logger?.LogCritical(
-                "================================================================================"
-            );
+            _logger?.LogError("================================================================================");
+            _logger?.LogError("DATABASE CONNECTION FAILED!");
+            _logger?.LogError("Error: {Error}", ex.Message);
+            _logger?.LogError("================================================================================");
+            _logger?.LogError("Connection string: {ConnectionString}", connectionString);
+            _logger?.LogError("================================================================================");
 
             throw new InvalidOperationException(
                 $"Cannot connect to database: {ex.Message}",
@@ -129,7 +117,6 @@ public class DB
         }
 
         _logger?.LogInformation("Connection string validation completed successfully");
-        _connectionValidated = true;
         return connectionString;
     }
 
@@ -245,30 +232,8 @@ public class DB
         return builder.ToString();
     }
 
-    // Вспомогательный метод для проверки подключения (для внешнего использования)
-    public bool TestConnection()
-    {
-        using var con = CreateConnection();
-        try
-        {
-            _logger?.LogInformation("Testing database connection...");
-            con.Open();
-
-            using var cmd = new FbCommand("SELECT 1 FROM RDB$DATABASE", con);
-            cmd.ExecuteScalar();
-
-            con.Close();
-            _logger?.LogInformation("Database connection test successful");
-            return true;
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError(ex, "Database connection test failed");
-            return false;
-        }
-    }
-
-    // Вспомогательный метод с расшифровкой ошибки
+    // Вспомогательный метод для проверки подключения (для внешнего использования).
+    // Возвращает признак успеха, при ошибке заполняет errorMessage расшифровкой.
     public bool TestConnection(out string errorMessage)
     {
         errorMessage = string.Empty;
@@ -376,11 +341,6 @@ public class DB
     // ... ОСТАЛЬНЫЕ МЕТОДЫ (TableExists, CheckRequiredTables, InsertAbout, и т.д.) ...
 
 
-private FbConnection CreateConnection()
-    {
-        return new FbConnection(_connectionString);
-    }
-
     // Метод для проверки существования таблицы в базе данных
     public bool TableExists(string tableName)
     {
@@ -399,7 +359,7 @@ private FbConnection CreateConnection()
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Ошибка при проверке таблицы {tableName}: {ex.Message}");
+            _logger?.LogError(ex, "Ошибка при проверке таблицы {TableName}", tableName);
             return false;
         }
     }
@@ -484,7 +444,7 @@ private FbConnection CreateConnection()
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error setting about: {ex.Message} for id_dev={id_dev}");
+            _logger?.LogError(ex, "Error setting about for id_dev={IdDev}", id_dev);
             return false;
         }
     }
@@ -515,7 +475,7 @@ private FbConnection CreateConnection()
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error setting last event ID: {ex.Message}");
+            _logger?.LogError(ex, "Error setting ONLINE state for id_dev={IdDev}", id_dev);
             return false;
         }
     }
@@ -547,7 +507,7 @@ private FbConnection CreateConnection()
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error setting last event ID: {ex.Message}");
+            _logger?.LogError(ex, "Error setting last event ID for id_dev={IdDev}", id_dev);
             return false;
         }
     }
@@ -576,7 +536,7 @@ private FbConnection CreateConnection()
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error getting last event ID: {ex.Message}");
+            _logger?.LogError(ex, "Error getting last event ID for id_dev={IdDev}", id_dev);
             return 0;
         }
     }
@@ -590,7 +550,7 @@ private FbConnection CreateConnection()
         int? id_eventtype = null,
         int? id_cntrl = null,
         int? id_reader = null,
-        string note = null,
+        string? note = null,
         DateTime? time = null,
         int? id_video = null,
         int? id_user = null,
@@ -734,95 +694,6 @@ private FbConnection CreateConnection()
             }
         }
     }
-    public int? _EventInsert(int id_db = 1, int? id_eventtype = null, int? id_cntrl = null,
-                           int? id_reader = null, string note = null, DateTime? time = null,
-                           int? id_video = null, int? id_user = null, int? ess1 = null,
-                           int? ess2 = null, int? idsource = null, long? idserverts = null)
-    {
-        using var con = CreateConnection(); 
-        try
-        {
-            con.Open();
-
-            string sql = @"EXECUTE PROCEDURE DEVICEEVENTS_INSERT(
-            @id_db, @id_eventtype, @id_cntrl, @id_reader, @note, @time, 
-            @id_video, @id_user, @ess1, @ess2, @idsource, @idserverts)";
-
-            using var command = new FbCommand(sql, con);
-
-            command.Parameters.AddWithValue("@id_db", id_db);
-            command.Parameters.AddWithValue("@id_eventtype", id_eventtype ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@id_cntrl", id_cntrl ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@id_reader", id_reader ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@note", note ?? (object)DBNull.Value);
-
-            string timeString = time?.ToString("yyyy-MM-dd HH:mm:ss") ?? "NOW";
-            command.Parameters.AddWithValue("@time", timeString);
-
-            command.Parameters.AddWithValue("@id_video", id_video ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@id_user", id_user ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@ess1", ess1 ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@ess2", ess2 ?? (object)DBNull.Value);
-            command.Parameters.AddWithValue("@idsource", idsource ?? 1);
-            command.Parameters.AddWithValue("@idserverts", idserverts != null ? (long)(idserverts / 1000) : (object)DBNull.Value);
-
-            // Добавляем выходной параметр
-            var outputParam = new FbParameter("@return_value", FbDbType.Integer);
-            outputParam.Direction = ParameterDirection.ReturnValue;
-            command.Parameters.Add(outputParam);
-
-            command.ExecuteNonQuery();
-
-            // Получаем возвращаемое значение
-            return outputParam.Value != DBNull.Value ? Convert.ToInt32(outputParam.Value) : (int?)null;
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error inserting event: {ex.Message}");
-            return null;
-        }
-    }
-    public List<EventType> GetAllEventTypes()
-    {
-        var eventTypes = new List<EventType>();
-
-        using var con = CreateConnection();
-        try
-        {
-            con.Open();
-
-            string sql = @"SELECT ID_EVENTTYPE, NAME 
-                       FROM eventtype 
-                       WHERE ACTIVE = 1 
-                       ORDER BY ID_EVENTTYPE";
-
-            using var command = new FbCommand(sql, con);
-            using var reader = command.ExecuteReader();
-
-            while (reader.Read())
-            {
-                eventTypes.Add(new EventType
-                {
-                    Id = reader.GetInt32(0),
-                    Name = reader.GetString(1)
-                });
-            }
-        }
-        catch (Exception ex)
-        {
-            Console.WriteLine($"Error getting event types: {ex.Message}");
-        }
-
-        return eventTypes;
-    }
-
-    // Класс для хранения данных о типе события
-    public class EventType
-    {
-        public int Id { get; set; }
-        public string Name { get; set; }
-    }
-
     public DataTable GetDevice()
     {
         using var con = CreateConnection();
@@ -853,12 +724,13 @@ private FbConnection CreateConnection()
         using var con = CreateConnection();
         con.Open();
 
-        string sql = $@"select cd.id_cardindev, cd.id_card, cd.id_dev,cd.operation from cardindev cd
+        const string sql = @"select cd.id_cardindev, cd.id_card, cd.id_dev, cd.operation from cardindev cd
         join device d on d.id_dev=cd.id_dev
         join device d2 on d2.id_ctrl=d.id_ctrl and d2.id_reader is null
-        where d2.id_dev={id_dev}";
+        where d2.id_dev=@id_dev";
 
         using var getcomand = new FbCommand(sql, con);
+        getcomand.Parameters.AddWithValue("@id_dev", id_dev);
         var reader = getcomand.ExecuteReader();
         DataTable table = new DataTable();
         table.Load(reader);
@@ -870,7 +742,8 @@ private FbConnection CreateConnection()
         using var con = CreateConnection();
         con.Open();
 
-        using var getcomand = new FbCommand($@"delete from cardindev cd where cd.id_cardindev ={id_cardindev}", con);
+        using var getcomand = new FbCommand(@"delete from cardindev cd where cd.id_cardindev = @id_cardindev", con);
+        getcomand.Parameters.AddWithValue("@id_cardindev", id_cardindev);
         getcomand.ExecuteNonQuery();
     }
 
@@ -879,7 +752,8 @@ private FbConnection CreateConnection()
         using var con = CreateConnection();
         con.Open();
 
-        using var getcomand = new FbCommand($@"update cardindev cd set cd.attempts=cd.attempts+1 where cd.id_cardindev={id_cardindev}", con);
+        using var getcomand = new FbCommand(@"update cardindev cd set cd.attempts = cd.attempts + 1 where cd.id_cardindev = @id_cardindev", con);
+        getcomand.Parameters.AddWithValue("@id_cardindev", id_cardindev);
         getcomand.ExecuteNonQuery();
     }
 
@@ -923,7 +797,7 @@ private FbConnection CreateConnection()
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error in FixCardIdxOK: {ex.Message}");
+            _logger?.LogError(ex, "Error in FixCardIdxOK for card={IdCard} id_dev={IdDev}", idCard, idDev);
             return 0;
         }
     }
@@ -940,16 +814,19 @@ private FbConnection CreateConnection()
         try
         {
             
+            // ВАЖНО: сравнение идёт с LOAD_RESULT, а не с ID_CARD.
+            // Раньше здесь стояло "ID_CARD not containing 'OK'", из-за чего условие
+            // было истинным почти всегда и метод перезаписывал статус всех карт.
             string updateSql = @"UPDATE CARDIDX cdx SET
                 LOAD_TIME = CURRENT_TIMESTAMP,
                 LOAD_RESULT = @messErr
-                WHERE (ID_CARD not containing 'OK')
+                WHERE (LOAD_RESULT not containing 'OK')
                 AND (ID_DEV in(
                 select d2.id_dev from device d
                 join device d2 on d2.id_ctrl=d.id_ctrl and d2.id_reader in (0,1)
                 where d.id_dev=@idDev
                  ))";
-            Console.WriteLine($"430 updateSql id_dev: {idDev}");
+            _logger?.LogDebug("FixDeviceErr id_dev={idDev} messErr={messErr}", idDev, messErr);
             using var updateCommand = new FbCommand(updateSql, con);
             updateCommand.Parameters.AddWithValue("@messErr", messErr);
             updateCommand.Parameters.AddWithValue("@idDev", idDev);
@@ -959,24 +836,8 @@ private FbConnection CreateConnection()
         }
         catch (Exception ex)
         {
-            Console.WriteLine($"Error in FixCardIdxOK: {ex.Message}");
+            _logger?.LogError(ex, "Error in FixDeviceErr for id_dev={idDev}", idDev);
             return 0;
         }
     }
 }
-/* 12.03.2025 для всех карт для указанной панели добавить load_result как ошибка.
- * @input id_dev - id панели
- * @input messErr - сообщение, которое надо вписать в load_result
- * 
- */
-/*
-public void updateCaridxErrAll(int id_dev, string messErr) {
-
-    string sql = $@"delete from bas_param bp where bp.id_dev={id_dev} and bp.param='{param_name}'";
-    FbCommand getcomand = new FbCommand(sql, con);
-    getcomand.ExecuteNonQuery();
-    string data_int_ = (data_int == null) ? "NULL" : data_int.ToString();
-    sql = $@"INSERT INTO BAS_PARAM (ID_DEV, PARAM, INTVALUE, STRVALUE) VALUES ({id_dev},'{param_name}',{data_int_},'{data_string}')";
-    getcomand = new FbCommand(sql, con);
-    getcomand.ExecuteNonQuery();
-}*/

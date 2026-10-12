@@ -1,4 +1,4 @@
-﻿using RestSharp;
+using RestSharp;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -17,15 +17,14 @@ namespace Basip
     {
         public int id_dev;
         public int ctrl;
-        public IPAddress ip;
-        public string name;
-        public string base_url;
-        public string login;
-        public string password;
-        public string token;
-        private string hashPassword;//2644256 admin
+        public IPAddress? ip;
+        public string? name;
+        public string? base_url;
+        public string login = string.Empty;
+        public string password = string.Empty;
+        public string? token;
         public bool is_online; // признак связи: true - усптройство на связи, false - прибор не отвечает
-        public string base_url_api;
+        public string base_url_api = string.Empty;
         public int time_wait = 10;
         public bool is_authenticated;
 
@@ -38,11 +37,11 @@ namespace Basip
 
                 this.id_dev = Convert.ToInt32(row["id_dev"]);
                 this.ctrl = Convert.ToInt32(row["ctrl"]);
-                this.name = Convert.ToString(row["ctrl_name"]);
+                this.name = row["ctrl_name"].ToString() ?? string.Empty;
 
 
-                // Проверяем, что IP не DBNull
-                if (row["ip"] != DBNull.Value)
+                // Проверяем, что IP не DBNull и не пустой
+                if (row["ip"] != DBNull.Value && !string.IsNullOrWhiteSpace(row["ip"].ToString()))
                 {
                     byte[] ip_byte = BitConverter.GetBytes((int)row["ip"]);
                     Array.Reverse(ip_byte);
@@ -56,9 +55,9 @@ namespace Basip
                 }
 
                 // Проверяем логин и пароль на DBNull
-                login = (row["login"] != DBNull.Value) ? row["login"].ToString() : string.Empty;
+                login = (row["login"] != DBNull.Value) ? row["login"].ToString() ?? string.Empty : string.Empty;
 
-                string passValue = (row["pass"] != DBNull.Value) ? row["pass"].ToString() : string.Empty;
+                string passValue = (row["pass"] != DBNull.Value) ? row["pass"].ToString() ?? string.Empty : string.Empty;
                 password = CreateMD5(passValue);
 
             }
@@ -78,20 +77,33 @@ namespace Basip
         }
 
         //получить информацию об устройстве без авторизации.
-        public async Task<JsonDocument> GetInfo()
+        public async Task<JsonDocument?> GetInfo()
         {
-            RestClient restClient = new RestClient(new RestClientOptions { Timeout = TimeSpan.FromSeconds(time_wait), BaseUrl = new Uri(base_url) });
+            RestClient restClient = new RestClient(new RestClientOptions { Timeout = TimeSpan.FromSeconds(time_wait), BaseUrl = new Uri(base_url ?? string.Empty) });
             var request = new RestRequest("/api/info");
             request.AddHeader("Accept", "application/json");
             request.AddHeader("Content-Type", "application/json");
             var get = await restClient.ExecuteGetAsync(request);
-            if (get == null || get.Content == null)
+
+            // Панель может ответить 401/404/5xx с непустым телом: раньше такой ответ
+            // считался признаком связи, а JsonDocument.Parse падал на не-JSON теле.
+            if (get == null || !get.IsSuccessful || string.IsNullOrWhiteSpace(get.Content))
             {
                 this.is_online = false;
                 return null;
             }
-            this.is_online = true;
-            return JsonDocument.Parse(get.Content);
+
+            try
+            {
+                var info = JsonDocument.Parse(get.Content);
+                this.is_online = true;
+                return info;
+            }
+            catch (JsonException)
+            {
+                this.is_online = false;
+                return null;
+            }
         }
 
         //попытка авторизации
@@ -102,18 +114,20 @@ namespace Basip
             request.AddHeader("Accept", "application/json");
             request.AddHeader("Content-Type", "application/json");
             var get = await restClient.ExecuteGetAsync(request);
-            if (get == null || get.Content == null)
+            if (get == null || !get.IsSuccessful || string.IsNullOrWhiteSpace(get.Content))
             {
                 this.is_online = false;
                 return false;
             }
             try
             {
-                token = JsonDocument.Parse(get.Content).RootElement.GetProperty("token").ToString();
+                token = JsonDocument.Parse(get.Content).RootElement.GetProperty("token").GetString();
 
             }
-            catch (Exception ex)
+            catch (Exception)
             {
+                this.is_online = false;
+                this.is_authenticated = false;
                 return false;
             }
             this.is_online = true;
@@ -140,7 +154,7 @@ namespace Basip
             request.AddBody(settingsJson);
             request.AddHeader("Accept", "application/json");
             request.AddHeader("Content-Type", "application/json");
-            request.AddHeader("Authorization", "Bearer " + token);;
+            request.AddHeader("Authorization", "Bearer " + token);
             return await restClient.ExecuteAsync(request);
         }
 
@@ -158,6 +172,14 @@ namespace Basip
         public async Task<RestResponse> AddIdentifier(string name, string type)
         {
             RestClient restClient = new RestClient(new RestClientOptions { Timeout = TimeSpan.FromSeconds(time_wait), BaseUrl = new Uri(base_url + base_url_api) });
+
+            // Номер карты обязан быть числом: Convert.ToInt64 здесь раньше выбрасывал
+            // исключение на нечисловом значении и роняло обработку всей панели.
+            if (!long.TryParse(name, out long identifierNumber))
+            {
+                throw new InvalidOperationException($"Card number '{name}' is not numeric and cannot be sent to the panel");
+            }
+
             var cardjson = new JsonObject()
             {
                 ["identifier_owner"] = new JsonObject()
@@ -166,7 +188,7 @@ namespace Basip
                     ["type"] = "owner"
                 },
                 ["identifier_type"] = type,
-                ["identifier_number"] = Convert.ToInt64(name).ToString(),
+                ["identifier_number"] = identifierNumber.ToString(),
                 ["lock"] = "all"
             };
             var request = new RestRequest("access/identifier");
@@ -261,9 +283,10 @@ namespace Basip
 
             if (fromTimestamp > 0)
             {
-                // Преобразуем timestamp в Unix time в секундах
-                //request.AddQueryParameter("from", (fromTimestamp/1000).ToString());
-                request.AddQueryParameter("from", (fromTimestamp).ToString());
+                // ВАЖНО: панель ожидает метку в миллисекундах, ровно в том виде,
+                // в каком она приходит в list_items[].timestamp и хранится в BAS_PARAM.LASTEVENT.
+                // Делить на 1000 нельзя: панель тогда вернёт события с начала эпохи.
+                request.AddQueryParameter("from", fromTimestamp.ToString());
             }
             //long unixSeconds = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 10800) * 1000;
             //request.AddQueryParameter("to", unixSeconds.ToString());
@@ -388,7 +411,7 @@ namespace Basip
 
                 return false;
             }
-            catch (Exception ex)
+            catch (Exception)
             {
                 return false;
             }
@@ -450,7 +473,7 @@ namespace Basip
             // Use input string to calculate MD5 hash
             using (System.Security.Cryptography.MD5 md5 = System.Security.Cryptography.MD5.Create())
             {
-                byte[] inputBytes = System.Text.Encoding.ASCII.GetBytes(input);
+                byte[] inputBytes = System.Text.Encoding.ASCII.GetBytes(input ?? string.Empty);
                 byte[] hashBytes = md5.ComputeHash(inputBytes);
 
                 // ИЗМЕНЕНО: в DLL версии используется BitConverter с Replace и ToLowerInvariant

@@ -40,7 +40,8 @@ echo [OK] Пакеты восстановлены
 echo.
 
 echo Шаг 4: Публикация приложения...
-dotnet publish "!PROJECT_FILE!" -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeAllContentForSelfExtract=true -o "publish\win-x64"
+rem --self-contained false: единый exe ~5 МБ, требует установленного .NET Runtime 8.0 на целевой машине
+dotnet publish "!PROJECT_FILE!" -c Release -r win-x64 --self-contained false -p:PublishSingleFile=true -o "publish\win-x64"
 if errorlevel 1 (
     echo [ОШИБКА] Публикация не удалась!
     pause
@@ -89,13 +90,13 @@ if errorlevel 1 (
     exit /b 1
 )
 
-if exist "Output\BasipKeyServiceSetup_v1.0.13.exe" (
+if exist "Output\BasipKeyServiceSetup_v2.0.3.4.exe" (
     echo.
     echo ========================================
     echo УСПЕХ: Инсталлятор создан!
     echo ========================================
-    echo Файл: Output\BasipKeyServiceSetup_v1.0.13.exe
-    for %%F in ("Output\BasipKeyServiceSetup_v1.0.13.exe") do (
+    echo Файл: Output\BasipKeyServiceSetup_v2.0.3.4.exe
+    for %%F in ("Output\BasipKeyServiceSetup_v2.0.3.4.exe") do (
         set size=%%~zF
         set /a sizeMB=!size!/1048576
         echo Размер инсталлятора: !sizeMB! МБ

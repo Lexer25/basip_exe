@@ -30,3 +30,8 @@ _ReSharper*/
 .vs/
 #Nuget packages folder
 packages/
+#Локальные настройки со строкой подключения к БД и паролем — в репозиторий не попадают
+appsettings.Development.json
+#Каталог локальной сборки из build.bat
+publish/
+Output/
