@@ -6,8 +6,9 @@
 
 basip keys services - это Windows-сервис для интеграции СКУД системы с панелями управления Bas-IP.
 
-Текущая версия приложения: 2.0.3.4 (задаётся в Basip.csproj и попадает в журнал строкой
-"Версия приложения basip: ..."). Версия установщика совпадает с версией приложения.
+Текущая версия приложения: 2.0.3.8 (задаётся в Basip.csproj; при каждом запуске она пишется
+в журнал строкой "Версия программы: ..." вместе с путём к исполняемому файлу).
+Версия установщика совпадает с версией приложения.
 
 Основные возможности:
 - Синхронизация карт доступа - запись и удаление карт на панелях Bas-IP
@@ -26,6 +27,12 @@ basip keys services - это Windows-сервис для интеграции С
 
 Поддерживаемые версии API панелей: 1.x и 2.x. Панели с API 3.0 и выше не обслуживаются -
 служба пишет предупреждение в журнал и пропускает такую панель.
+
+Адрес журнала событий зависит от мажорной версии API панели (поле api_version из /api/info):
+- 2.x и выше - GET /api/v1/log/items с параметром from=<метка времени в миллисекундах>;
+- 1.x - GET /api/v1/log/list с фильтром filter=timestamp+ge+<метка времени в миллисекундах>.
+Для панелей 1.x запрос к log/items возвращает системный журнал (вход в веб-интерфейс),
+а не журнал проходов, поэтому адрес выбирается по версии.
 
 
 # 2. УСТАНОВКА
@@ -55,7 +62,7 @@ basip keys services - это Windows-сервис для интеграции С
 
 3. Сборка и установка (рекомендуемый способ):
    Запустите build.bat - он восстановит пакеты, опубликует приложение
-   в publish\win-x64 и соберёт установщик Output\BasipKeyServiceSetup_v2.0.3.4.exe.
+   в publish\win-x64 и соберёт установщик Output\BasipKeyServiceSetup_v2.0.3.8.exe.
    Установщик сам регистрирует службу с именем "Basip Key Service".
 
    Результат сборки - один файл publish\win-x64\basipkeysservices.exe размером ~5 МБ.
@@ -93,7 +100,7 @@ basip keys services - это Windows-сервис для интеграции С
   },
   "Log": {
     "LogFolerPath": "C:\\ProgramData\\Basip\\",
-    "LogLevel": "Debug",
+    "LogLevel": "Debug",                  // уровень журнала для наших категорий (Basip.*)
     "retainedFileCountLimit": 7
   },
   "Service": {
@@ -122,12 +129,22 @@ basip keys services - это Windows-сервис для интеграции С
 - clear_log - очистка журнала событий на панелях после обработки
 
 Раздел "Log":
-- LogFolerPath - путь к каталогу логов (имя параметра оставлено как в коде)
-- LogLevel - уровень детализации файлового журнала
+- LogFolerPath - путь к каталогу логов (имя параметра оставлено как в коде).
+  Каталог проверяется пробной записью: если он недоступен на запись (нет прав, каталог
+  не создаётся), журнал ведётся в первом доступном каталоге - C:\ProgramData\Basip\,
+  каталог службы, %LOCALAPPDATA%\Basip; причина подмены пишется в журнал (Warning)
+- LogLevel - уровень журнала для категорий приложения (Basip.*): Worker, DB, Device,
+  Basip.DebugOutput, StartupFailureService. По умолчанию Information.
+  Именно этот параметр включает подробную отладку (Trace и Debug) в файле и в консоли
 - retainedFileCountLimit - количество хранимых файлов логов
 
-Раздел "Logging":
-- LogLevel:Default - уровень вывода в консоль
+Раздел "Logging" (необязательный):
+- если секции нет, служебные категории (Microsoft.*, хост и жизненный цикл приложения)
+  пишутся на уровне Information, а категории приложения - на уровне Log:LogLevel
+- LogLevel:Default - общий уровень для всех категорий (если секция задана)
+- LogLevel:<Категория> - уровень для конкретной категории, например "Basip.Worker"
+- уровень конкретного провайдера задаётся как Logging:<Провайдер>:LogLevel, например
+  "Logging": { "Console": { "LogLevel": { "Default": "Trace" } } }
 
 Где хранить строку подключения:
 - На стенде заказчика: прямо в appsettings.json рядом со службой.
@@ -159,53 +176,97 @@ basip keys services - это Windows-сервис для интеграции С
 - Error - ошибки выполнения операций
 - Critical - критические ошибки, требующие вмешательства
 
-Типовые сообщения в логах:
+Формат строки журнала:
+
+ДД-ММ-ГГГГ ЧЧ:мм:сс.fff - [УРОВЕНЬ][метка] сообщение
+
+Метка показывает, к какой панели относится запись:
+- [617] - запись сделана при обработке панели с id_dev=617;
+- [sys] - запись не связана с конкретной панелью (запуск и остановка службы, итерация,
+  таймаут, ошибки конфигурации, служебные сообщения хоста).
+
+Метка ставится всем записям автоматически, отдельно её прописывать в текстах не нужно.
+В скобках уровня - сокращение уровня в журнале: VRB (Trace), DBG (Debug), INF (Information),
+WRN (Warning), ERR (Error), FTL (Critical) - так уровень называется в Serilog.
+
+Типовые сообщения в логах (примеры для id_dev=617):
 
 Старт/остановка службы:
-32 basip start: 09:10:00 deltasleep: 00:00:00
-33 Service basip write and delete card started
-49 basip stop
+[INF][sys] Версия программы: 2.0.3.8. Исполняемый файл: C:\ArtonitSevices\basipkeysservices\basipkeysservices.exe
+[INF][sys] 32 basip start: 09:10:00 deltasleep: 00:00:00, первый запуск: 2026-10-13 09:10:00
+[INF][sys] 33 Service basip write and delete card started
+[INF][sys] 126 timeout basip: 00:10:00, следующий запуск: 2026-10-13 17:35:00
+[FTL][sys] 49 basip stop
 
 Работа с устройствами:
-71 Зарегистрировано панелей bas-ip: 5 шт.
-Processing 3 devices with valid IP addresses
+[INF][sys] 71 Зарегистрировано панелей bas-ip: 5 шт.
+[INF][sys] 164 Processing 3 devices with valid IP addresses
+[INF][617] 240 id_dev=617 Device http://192.168.68.2:80 apiVersion: 1.3.5, major: 1, middle: 3
+[DBG][617] 288 id_dev=617 major api для обработки событий = 1
+
+Сбор событий и запросы к панели (уровень Trace, то есть Log:LogLevel = Trace):
+[VRB][617] 264 id_dev=617 Старт сбор событий IP: http://192.168.68.2:80 начиная с метки времени 2026-10-13 12:29:57
+[VRB][617] 443 === REQUEST DETAILS === ... QueryString: filter = timestamp+ge+1790802000000 ...
+[VRB][617] 455 GetLog result: status=OK, body={"list_option":...,"list_items":[...]}
+[VRB][617] 276 id_dev=617 Получено 20 событий от device base_url= http://192.168.68.2:80
+[DBG][617] 304 id_dev=617 Обработано 3 событий, последняя метка времени to: 2026-10-13 17:20:11
 
 Операции с картами:
-Command destination: writekey id_dev=1 BASE_URL http://192.168.1.100:80 key="0001234567" AddCard
-Answer destination: writekey id_dev=1 BASE_URL http://192.168.1.100:80 Answer: OK key="0001234567" uid=1673
-
-Обработка событий:
-Event saved: Dev=1, Type=access_granted_by_valid_identifier, Code=50
-Event saved: Dev=1, Type=access_denied_by_unknown_card, Code=46
+[INF][617] 369 Command destination: writekey id_dev=617 BASE_URL http://192.168.68.2:80 key="0001234567" AddCard
+[INF][617] 412 Answer destination: writekey id_dev=617 BASE_URL http://192.168.68.2:80 Answer: OK key="0001234567" uid=1673
+[INF][617] 471 CARD ALREADY EXISTS - Device: http://192.168.68.2:80, id_dev=617, Card Number: 0001234567, Existing UID: 1673
 
 Ошибки и предупреждения:
-Skipping device ID 5 - no IP address
-Device http://192.168.1.101:80 offline or auth failed
-Failed to get events. Status: Unauthorized
+[DBG][617] 149-0 Skipping device ID 617 - no IP address
+[INF][617] 192 id_dev=617 IP http://192.168.68.2:80 - нет связи.
+[WRN][617] 336 id_dev=617 Failed to get events. Status: Unauthorized
+[FTL][sys] Служба не запущена: конфигурация приложения заполнена не полностью. Файл конфигурации: ...
 
 Мониторинг работы:
 
 1. Проверка подключения к БД:
-   - Успешное подключение: Ok connect database
-   - Ошибка: No connect database: [connection_string]
+   - Успешное подключение: [INF][sys] 97 Ok connect database
+   - Ошибка: [ERR][sys] 104 No connect database: [connection_string]
 
 2. Статус устройств:
-   - Онлайн: Device [ip] online and authenticated
-   - Офлайн: Device [ip] offline or auth failed
+   - Панель отвечает: [INF][617] 202 id_dev=617 Device ... STRVALUE for 'about': aa07bd,1.6.0 20251216,3.13.4,1.3.5, Auth OK
+   - Нет связи: [INF][617] 192 id_dev=617 IP http://... - нет связи.
+   - Нет авторизации: [INF][617] 211 id_dev=617 Device http://... auth failed
 
 3. Обработка событий:
-   - Новые события: Retrieved [count] events from device [ip]
-   - Нет событий: No new events to process
+   - Новые события: [VRB][617] 276 id_dev=617 Получено N событий от device base_url= http://...
+   - Нет событий: [INF][617] 326 id_dev=617 Нет новых события для IP: http://..., device 617, major api = 1
+   - Что вернула панель: [VRB][617] 455 GetLog result: status=OK, body=...
 
 4. Очистка логов:
-   - Успешно: Successful attempt to clear the event log
-   - Ошибка: Failed attempt to clear the event log
+   - Успешно: [INF][617] 312 Successful attempt to clear the event log IP: http://..., device 617,id_dev=617,  major api = 1
+   - Ошибка: [WRN][617] 321 id_dev=617 The event log has not been cleared IP: http://..., device 617, major api = 1
 
 Файлы логов:
-- Расположение: C:\ProgramData\Basip\ (или указанный в настройках путь)
-- Имя файла: ArtonitBasIpTools.log
-- Ротация: сохраняются последние 7 файлов
-- Формат: ДД-ММ-ГГГГ ЧЧ:мм:сс.fff - [Уровень] Сообщение
+- Расположение: C:\ProgramData\Basip\ (или указанный в настройках путь; если каталог
+  недоступен на запись, используется первый доступный - см. Log:LogFolerPath)
+- Имя файла: ArtonitBasIpTools-ГГГГММДД.log (дату в имя добавляет файловый провайдер,
+  поэтому файл заводится на каждые сутки)
+- Ротация: сохраняются последние retainedFileCountLimit файлов (по умолчанию 7)
+- Формат: ДД-ММ-ГГГГ ЧЧ:мм:сс.fff - [УРОВЕНЬ][метка] сообщение
+- Ошибки запуска (незаполненный Service:db_config, повреждённый appsettings.json) пишутся
+  в этот же файл, а служба завершается с кодом возврата 1, а не падает с необработанным
+  исключением
+
+Отладка на одной панели:
+
+Чтобы отработать только с одной панелью (например, id_dev=617):
+- временно добавить в Worker.run() после получения id панели строку
+  if (rowDeviceId != 617) continue;
+- либо обнулить параметр IP у остальных панелей в BAS_PARAM (служба пропускает панели
+  с IP = 0), предварительно сохранив значения;
+- либо работать с копией базы, в которой оставлена только нужная панель (безопасно для
+  боевых данных);
+- если нужно только читать журнал по одной панели, ничего менять не надо: выбрать строки
+  по метке, например Select-String -Path .\ArtonitBasIpTools-*.log -Pattern '\[617\]'.
+
+При отладке сбора событий держите Service:clear_log = false, иначе служба очищает журнал
+событий панели после обработки и повторный прогон тех же событий уже не увидит.
 
 Диагностика проблем:
 
@@ -222,5 +283,7 @@ Failed to get events. Status: Unauthorized
 3. События не обрабатываются:
    - Проверить параметр clear_log
    - Проверить временные метки в BAS_PARAM (LASTEVENT)
-   - Проверить коды событий в логах панелей
+   - Проверить, что служба обращается к правильному адресу журнала для версии API панели:
+     для 1.x - log/list с фильтром timestamp, для 2.x - log/items с параметром from
+     (видно по строкам 443 REQUEST DETAILS и 455 GetLog result)
    - Помнить: панели с API 3.0 и выше не обслуживаются

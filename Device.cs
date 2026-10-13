@@ -1,3 +1,5 @@
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using RestSharp;
 using System;
 using System.Collections.Generic;
@@ -15,6 +17,13 @@ namespace Basip
 {
     public class Device
     {
+        /// <summary>
+        /// Категория журнала для отладочного вывода Device (логгер создаёт Worker).
+        /// </summary>
+        public const string DebugLogCategory = "Basip.DebugOutput";
+
+        private readonly ILogger logger;
+
         public int id_dev;
         public int ctrl;
         public IPAddress? ip;
@@ -28,9 +37,21 @@ namespace Basip
         public int time_wait = 10;
         public bool is_authenticated;
 
+        /// <summary>
+        /// Мажорная версия API панели (первое число из api_version), её выставляет Worker.
+        /// От неё зависит адрес журнала: 1 — "log/list" с фильтром timestamp, 2 и выше —
+        /// "log/items" с параметром from.
+        /// </summary>
+        public int major_api_version = 2;
 
-        public Device(DataRow row, int time_wait)
+
+        // Имя параметра debugLogger, а не logger: иначе параметр затеняет поле,
+        // и обращение logger.LogTrace внутри конструктора уходит в nullable-параметр.
+        public Device(DataRow row, int time_wait, ILogger? debugLogger = null)
         {
+            // NullLogger: если логгер не передан, вызовы logger.LogTrace остаются рабочими,
+            // но ничего не пишут.
+            this.logger = debugLogger ?? NullLogger.Instance;
             this.time_wait = time_wait;
             try
             {
@@ -63,16 +84,29 @@ namespace Basip
             }
             catch (Exception e)
             {
-                // Просто логируем и перебрасываем исключение
-                Console.WriteLine($"Error creating Device object for ID {row["id_dev"]}: {e.Message}");
+                // row может быть null (и столбца может не быть): обращение к row["id_dev"]
+                // внутри обработчика выбрасывало второе исключение, из-за чего сообщение
+                // не попадало в журнал.
+                string deviceId = "unknown";
+                try
+                {
+                    deviceId = row?["id_dev"]?.ToString() ?? "unknown";
+                }
+                catch (Exception)
+                {
+                    // оставляем "unknown"
+                }
+
+                logger.LogTrace($"93 Error creating Device object for ID {deviceId}: {e.Message}");
                 throw;
             }
 
             base_url_api = "/api/v1";
         }
 
-        public Device()
+        public Device(ILogger? debugLogger = null)
         {
+            this.logger = debugLogger ?? NullLogger.Instance;
             base_url_api = "/api/v1";
         }
 
@@ -263,21 +297,125 @@ namespace Basip
             return await restClient.ExecuteGetAsync(request);
         }
 
+        /// <summary>
+        /// Аналог getEvent() из basoop.php: получить последние события журнала.
+        /// Сначала одним запросом (первая страница getLog) выясняется общее количество
+        /// событий, затем запрашивается последняя страница журнала — там самые свежие события.
+        /// fromTimestamp — метка времени в миллисекундах, взятая из BAS_PARAM.LASTEVENT
+        /// (в PHP это $this->getLastEventID()).
+        /// </summary>
         public async Task<RestResponse> GetEvents(long fromTimestamp = 0, int limit = 50)
         {
+            if (limit < 1) limit = 50;
+
+            // 1. Пробный запрос — аналог getTotalCount($this->getLog($from, 50)) в basoop.php.
+            //    Сами события этой страницы не нужны: из ответа берётся только количество записей.
+            RestResponse probeResponse = await GetLog(fromTimestamp, limit, 1, 1);//последний параметр 1 - данные берутся для подсчета количества записей
+
+            if (probeResponse == null)
+            {
+                // Панель не ответила: повторяем запрос, чтобы вернуть вызывающему коду
+                // штатный ответ устройства, а не null.
+                return await GetLog(fromTimestamp, limit, 1);
+            }
+
+            if (!probeResponse.IsSuccessful)
+            {
+                logger.LogTrace($"317 GetEvents: не удалось получить количество событий, status={probeResponse.StatusCode}, ответ возвращён без разбора страниц");
+                return probeResponse;
+            }
+
+            int totalEventCount = GetTotalCount(probeResponse);
+
+            // 2. Последняя страница журнала: ceil(total_items / limit), как в basoop.php
+            //    (там это page = ceil($totalEventCount / $this->limit)).
+            long pageCount = (long)Math.Ceiling((double)totalEventCount / limit);
+            if (pageCount < 1) pageCount = 1;
+
+           // logger.LogTrace($"328 GetEvents: id_dev={id_dev} base_url={base_url}  from={fromTimestamp} количество событий={totalEventCount}, количество страниц={pageCount}");
+            // Метка времени в журнале — в читаемом виде: в запрос к панели уходят
+            // миллисекунды, а в строке удобнее видеть дату и время.
+            string fromText = fromTimestamp > 0
+                ? DateTimeOffset.FromUnixTimeMilliseconds(fromTimestamp).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss")
+                : "не задана";
+
+            logger.LogTrace($"334 GetEvents: id_dev={id_dev} base_url={base_url} начиная с даты {fromText} (unix millis {fromTimestamp}) количество событий={totalEventCount}, количество страниц={pageCount}");
+
+            // Если все события укладываются в одну страницу, нужная страница уже получена
+            // пробным запросом — второй раз дёргать панель незачем (в basoop.php здесь
+            // всегда идёт повторный getLog).
+            if (pageCount == 1)
+            {
+                return probeResponse;
+            }
+
+            return await GetLog(fromTimestamp, limit, (int)pageCount);
+        }
+
+        /// <summary>
+        /// Аналог getTotalCount() из basoop.php: общее количество записей в журнале
+        /// из res.list_option.pagination.total_items. Если поле отсутствует или ответ
+        /// не является JSON, возвращается 0.
+        /// </summary>
+        public static int GetTotalCount(RestResponse? response)
+        {
+            if (response == null || string.IsNullOrWhiteSpace(response.Content))
+            {
+                return 0;
+            }
+
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(response.Content);
+                if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                    !document.RootElement.TryGetProperty("list_option", out JsonElement listOption) ||
+                    !listOption.TryGetProperty("pagination", out JsonElement pagination) ||
+                    !pagination.TryGetProperty("total_items", out JsonElement totalItems))
+                {
+                    return 0;
+                }
+
+                return totalItems.ValueKind switch
+                {
+                    JsonValueKind.Number => totalItems.TryGetInt32(out int number) ? number : 0,
+                    JsonValueKind.String => int.TryParse(totalItems.GetString(), out int parsed) ? parsed : 0,
+                    _ => 0
+                };
+            }
+            catch (JsonException)
+            {
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Аналог getLog() из basoop.php: чтение журнала событий устройства постранично.
+        /// Параметры запроса: locale, from (метка времени в мс), limit, page_number, sort_type.
+        /// В ответе панели status — это StatusCode, а res из PHP — это Content (JSON
+        /// с list_option.pagination и list_items), который разбирает вызывающий код.
+        /// </summary>
+        public async Task<RestResponse> GetLog(long fromTimestamp = 0, int limit = 50, int page = 1, int dataForCount=0)
+        {
+            logger.LogTrace($"392 GetLog start: fromTimestamp={fromTimestamp}, limit={limit}, page={page},dataForCount={dataForCount}");
+            if (limit < 1) limit = 50;
+            if (page < 1) page = 1;
+
             RestClient restClient = new RestClient(new RestClientOptions
             {
                 Timeout = TimeSpan.FromSeconds(time_wait),
                 BaseUrl = new Uri(base_url + base_url_api)
             });
 
-            var request = new RestRequest("log/items");
+            // Адрес журнала зависит от мажорной версии API панели:
+            // 2.x и выше — "log/items" (метка времени в параметре from);
+            // 1.x — "log/list" (метка времени в фильтре filter=timestamp ge <мс>).
+            bool oldApi = major_api_version <= 1;
+            var request = new RestRequest(oldApi ? "log/list" : "log/items");
 
             // Добавляем параметры запроса
+            request.AddQueryParameter("locale", "ru");
             request.AddQueryParameter("limit", limit.ToString());
-            request.AddQueryParameter("page_number", "1");
-            request.AddQueryParameter("locale", "en");
-            request.AddQueryParameter("sort_type", "asc"); // от старых к новым
+            request.AddQueryParameter("page_number", page.ToString());
 
             // ПРАВИЛЬНЫЙ ФОРМАТ ФИЛЬТРА для Bas-IP API
 
@@ -286,7 +424,17 @@ namespace Basip
                 // ВАЖНО: панель ожидает метку в миллисекундах, ровно в том виде,
                 // в каком она приходит в list_items[].timestamp и хранится в BAS_PARAM.LASTEVENT.
                 // Делить на 1000 нельзя: панель тогда вернёт события с начала эпохи.
-                request.AddQueryParameter("from", fromTimestamp.ToString());
+                if (oldApi)
+                {
+                    // Панели API 1.x фильтруют по метке времени. Пробелы в фильтре должны
+                    // уходить как "+", поэтому строка собирается уже в нужном виде,
+                    // а повторное кодирование значения отключено.
+                    request.AddQueryParameter("filter", $"timestamp+ge+{fromTimestamp}", false);
+                }
+                else
+                {
+                    request.AddQueryParameter("from", fromTimestamp.ToString());
+                }
             }
             //long unixSeconds = (DateTimeOffset.UtcNow.ToUnixTimeSeconds() + 10800) * 1000;
             //request.AddQueryParameter("to", unixSeconds.ToString());
@@ -320,10 +468,14 @@ namespace Basip
             }
 
             sb.AppendLine("====================");
-            Console.WriteLine(sb.ToString());
+            logger.LogTrace($"443 {sb}");
 
+            RestResponse response = await restClient.ExecuteGetAsync(request);
 
-            return await restClient.ExecuteGetAsync(request);
+            // Результат запроса фиксируется в журнале: статус и тело ответа панели.
+            if(dataForCount==0) logger.LogTrace($"455 GetLog result: status={response.StatusCode}, body={response.Content}");
+
+            return response;
         }
 
         public async Task<RestResponse> SystemClearingLog()

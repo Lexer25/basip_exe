@@ -2,9 +2,7 @@ using Microsoft.Extensions.FileSystemGlobbing.Internal.PathSegments;
 using Microsoft.Extensions.Logging;
 using RestSharp;
 using System.Data;
-using System.Diagnostics;
 using System.Net;
-using System.Reflection;
 using System.Text.Json;
 using static Basip.WorkerOptions;
 
@@ -20,14 +18,20 @@ namespace Basip
         public TimeSpan deltasleep;
 
         private readonly string version;
+        private readonly ILogger debugLogger;
 
-        public Worker(ILogger<Worker> logger, WorkerOptions options, IHostApplicationLifetime lifetime)
+        public Worker(ILogger<Worker> logger, WorkerOptions options, IHostApplicationLifetime lifetime, ILoggerFactory loggerFactory)
         {
+            // Метку id_dev/[sys] добавляет обёртка провайдеров журнала (см. Program.cs),
+            // поэтому здесь используются обычные логгеры.
             this.logger = logger;
             this.options = options;
             this.lifetime = lifetime;
 
-            version = GetApplicationVersion();
+            // Отдельная категория для отладочного вывода Device: запись идёт с уровнем Trace.
+            debugLogger = loggerFactory.CreateLogger(Device.DebugLogCategory);
+
+            version = ApplicationInfo.Version;
 
             // Интервал опроса разбирается так же безопасно, как и timestart:
             // кривое значение в конфиге больше не роняет конструктор службы.
@@ -72,42 +76,11 @@ namespace Basip
             return true;
         }
 
-        // Получение версии приложения
-        private string GetApplicationVersion()
-        {
-            try
-            {
-                // AssemblyVersion — основной источник (задаётся в Basip.csproj)
-                var assembly = Assembly.GetExecutingAssembly();
-                var version = assembly.GetName().Version?.ToString();
-                if (!string.IsNullOrEmpty(version) && version != "0.0.0.0")
-                    return version;
-
-                // Резерв: версия из самого exe-файла.
-                // Assembly.Location в однофайловой сборке всегда пуст (IL3000), поэтому
-                // путь берём через Environment.ProcessPath — иначе эта ветка не работала.
-                string? exePath = Environment.ProcessPath;
-                if (!string.IsNullOrEmpty(exePath))
-                {
-                    var fileInfo = FileVersionInfo.GetVersionInfo(exePath);
-                    if (!string.IsNullOrEmpty(fileInfo.ProductVersion))
-                        return fileInfo.ProductVersion;
-                    if (!string.IsNullOrEmpty(fileInfo.FileVersion))
-                        return fileInfo.FileVersion;
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogInformation($"65 Version detection: {ex.Message}");
-            }
-
-            return "2.0.0"; // Значение по умолчанию
-        }
-
-
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            logger.LogInformation(@$"32 basip start: {timestart} deltasleep: {deltasleep}");
+            // Время первого запуска указывается явно: при run_now = false служба ждёт timestart.
+            DateTime firstRun = DateTime.Now.Add(deltasleep);
+            logger.LogInformation(@$"32 basip start: {timestart} deltasleep: {deltasleep}, первый запуск: {firstRun:yyyy-MM-dd HH:mm:ss}");
             logger.LogInformation(@$"33 Service basip write and delete card started");
 
             // Ожидание старта прерывается остановкой службы, иначе Task.Delay
@@ -166,7 +139,10 @@ namespace Basip
                     continue;
                 }
 
-                logger.LogInformation($@"126 timeout basip: {timeout}");
+                // Время следующего запуска указывается явно: раньше его приходилось
+                // считать по строке timeout в уме. Дата нужна на случай перехода через полночь.
+                DateTime nextRun = DateTime.Now.Add(timeout);
+                logger.LogInformation($@"126 timeout basip: {timeout}, следующий запуск: {nextRun:yyyy-MM-dd HH:mm:ss}");
                 await Task.Delay(timeout, stoppingToken);
             }
 
@@ -186,14 +162,21 @@ namespace Basip
             {
                 try
                 {
+                    int rowDeviceId = Convert.ToInt32(row["id_dev"]);
+
+                   // if (rowDeviceId != 617) continue;   // ← временно, только для отладки
+
+                    // Записи об этой панели тоже помечаются её id_dev.
+                    using IDisposable deviceScope = DeviceContext.Set(rowDeviceId);
+
                     if (row["IP"] == DBNull.Value || Convert.ToInt32(row["IP"]) == 0)
                     {
-                        logger.LogDebug($"149-0 Skipping device ID {row["id_dev"]} - no IP address");
+                        logger.LogDebug($"149-0 Skipping device ID {rowDeviceId} - no IP address");
                         continue;
                     }
-                    logger.LogDebug($"149-1  device ID {row["id_dev"]} IP {row["id_dev"]} is OK");
+                    logger.LogDebug($"149-1  device ID {rowDeviceId} IP {rowDeviceId} is OK");
                     validDevicesCount++;
-                    logger.LogDebug($"149-2 start TaskGet ID {row["id_dev"]}");
+                    logger.LogDebug($"149-2 start TaskGet ID {rowDeviceId}");
                     tasks.Add(TaskGet(row, db));
                 }
                 catch (Exception ex)
@@ -221,8 +204,12 @@ namespace Basip
         {
             String auth = "Auth OK";
             int currentDeviceId = (int)row["id_dev"];
-           
-            Device dev = new Device(row, options.time_wait_http);
+
+            // Все записи журнала внутри обработки панели (включая запросы к БД и панели)
+            // помечаются её id_dev.
+            using IDisposable deviceScope = DeviceContext.Set(currentDeviceId);
+
+            Device dev = new Device(row, options.time_wait_http, debugLogger);
 
             JsonDocument? deviceInfo = await dev.GetInfo();
             if (deviceInfo == null)
@@ -280,6 +267,10 @@ namespace Basip
 
             logger.LogInformation($"240 id_dev={dev.id_dev} Device {dev.base_url} apiVersion: {_apiVersion}, major: {major}, middle: {middle}");
 
+            // Мажорная версия API нужна Device, чтобы выбрать адрес журнала
+            // ("log/items" для 2.x, "log/list" для 1.x).
+            dev.major_api_version = major;
+
             // Контроль версии API. С версиями 3.0 и выше не работаем.
             // Раньше условие было (major == 3 && middle > 0), поэтому 3.0 проходила как разрешённая.
             if (major >= 3)
@@ -322,7 +313,7 @@ namespace Basip
 
                         long maxTimestamp = lastTimestamp;
                         int processedEventsCount = 0;
-
+                        
                         // Обрабатываем все события НАЧИНАЯ С последнего timestamp
                         foreach (var logItem in logsData.list_items)
                         {
@@ -331,7 +322,7 @@ namespace Basip
                             var lastStr = DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
 
                             logger.LogDebug(
-                                "334 id_dev={IdDev} параметры события и времена обработки currentTimestamp={currentTimestamp}, logItemTimestamp={logItemTimestamp}, lastTimestamp={lastTimestamp}",
+                                "319 id_dev={IdDev} параметры события и времена обработки currentTimestamp={currentTimestamp}, logItemTimestamp={logItemTimestamp}, lastTimestamp={lastTimestamp}",
                                 dev.id_dev, currentStr, logItemStr, lastStr);
 
                             // Берем события с timestamp >= lastTimestamp
@@ -687,6 +678,10 @@ namespace Basip
                 {
                     "access_denied_by_unknown_card" => 46,
                     "access_granted_by_valid_identifier" => 50,
+                    "lock_was_opened_by_exit_btn" => 49,
+                    "access_granted_by_call_host" => 51,
+                    "access_denied_by_not_valid_input_code" => 91,
+                    "access_granted_by_master_code" => 90,
                     _ => 0 // для остальных событий
                 };
 
@@ -709,7 +704,6 @@ namespace Basip
                         id_eventtype: eventCode,
                         id_cntrl: dev.ctrl,
                         id_reader: 0,
-                        //note: cardNumber == null ? note : $"{note}, Card={cardNumber}",
                         note: cardNumber,
                         time: dateTime,
                         id_video: null,
@@ -726,11 +720,11 @@ namespace Basip
                     {
                         if (cardNumber != null)
                         {
-                            logger.LogInformation($"+{note}, Card={cardNumber}, EventType={eventCode}, Id_Event={insertedId},  major api = {majorVersion}");
+                            logger.LogInformation($"703 +{note}, Card={cardNumber}, EventType={eventCode}, Id_Event={insertedId},  major api = {majorVersion}, id_dev={dev.id_dev}");
                         }
                         else
                         {
-                            logger.LogInformation($"+{note}, EventType={eventCode}, Id_Event={insertedId}, major api = {majorVersion}");
+                            logger.LogInformation($"711 +{note}, EventType={eventCode}, Id_Event={insertedId}, major api = {majorVersion}");
                         }
                     }
 
@@ -742,6 +736,9 @@ namespace Basip
                     {
                         logger.LogError($"722 Failed to save event: Dev={deviceId}, EventType={eventCode}, major api = {majorVersion} ");
                     }
+                } else
+                {
+                    logger.LogInformation($"703 -{note}, Card={cardNumber}, EventType={eventCode}, Id_Event=,  major api = {majorVersion}, id_dev={dev.id_dev}");
                 }
             }
 
