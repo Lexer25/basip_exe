@@ -678,7 +678,8 @@ namespace Basip
                 {
                     "access_denied_by_unknown_card" => 46,
                     "access_granted_by_valid_identifier" => 50,
-                    "lock_was_opened_by_exit_btn" => 49,
+                  //  "lock_was_opened_by_exit_btn" => 49,
+                  //  "successful_login_api_call" => 49,
                     "access_granted_by_call_host" => 51,
                     "access_denied_by_not_valid_input_code" => 91,
                     "access_granted_by_master_code" => 90,
@@ -697,8 +698,7 @@ namespace Basip
 
                 if (eventCode > 0)
                 {
-                    // В БД уходит сформированная строка note, а не только номер карты:
-                    // до этой правки переменная note использовалась лишь в логе.
+                    
                     int? insertedEventTypeId = db.EventInsert(
                         id_db: 1,
                         id_eventtype: eventCode,
@@ -738,7 +738,7 @@ namespace Basip
                     }
                 } else
                 {
-                    logger.LogInformation($"703 -{note}, Card={cardNumber}, EventType={eventCode}, Id_Event=,  major api = {majorVersion}, id_dev={dev.id_dev}");
+                    logger.LogInformation($"741 -{note}, Card={cardNumber}, EventType={eventCode}, Id_Event=,  major api = {majorVersion}, id_dev={dev.id_dev}");
                 }
             }
 

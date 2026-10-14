@@ -1,4 +1,4 @@
-﻿@echo off
+@echo off
 chcp 65001 >nul
 setlocal enabledelayedexpansion
 
@@ -90,13 +90,13 @@ if errorlevel 1 (
     exit /b 1
 )
 
-if exist "Output\BasipKeyServiceSetup_v2.0.3.8.exe" (
+if exist "Output\BasipKeyServiceSetup_v2.0.3.9.exe" (
     echo.
     echo ========================================
     echo УСПЕХ: Инсталлятор создан!
     echo ========================================
-    echo Файл: Output\BasipKeyServiceSetup_v2.0.3.8.exe
-    for %%F in ("Output\BasipKeyServiceSetup_v2.0.3.8.exe") do (
+    echo Файл: Output\BasipKeyServiceSetup_v2.0.3.9.exe
+    for %%F in ("Output\BasipKeyServiceSetup_v2.0.3.9.exe") do (
         set size=%%~zF
         set /a sizeMB=!size!/1048576
         echo Размер инсталлятора: !sizeMB! МБ

@@ -755,7 +755,7 @@ public class DB
             object serverTsValue = DBNull.Value;
             if (idserverts.HasValue && idserverts.Value > 0)
             {
-                long seconds = idserverts.Value / 1000;
+                long seconds = idserverts.Value / 1000;//иначе не умещается в базу данных
                 if (seconds > 0 && seconds <= int.MaxValue)
                 {
                     serverTsValue = (int)seconds;
@@ -781,8 +781,8 @@ public class DB
                 int result = Convert.ToInt32(outputParam.Value);
 
                 _logger?.LogDebug(
-                    "Event inserted successfully. ID: {EventId}, Device: {DeviceId}, Type: {EventType}",
-                    result, id_cntrl ?? 0, id_eventtype ?? 0);
+                    "784 Event inserted successfully. ID: {EventId}, Device: {DeviceId}, Type: {EventType}, timestam: {idserverts}",
+                    result, id_cntrl ?? 0, id_eventtype ?? 0, idserverts ?? 0);
 
                 return result;
             }

@@ -298,11 +298,13 @@ namespace Basip
         }
 
         /// <summary>
-        /// Аналог getEvent() из basoop.php: получить последние события журнала.
-        /// Сначала одним запросом (первая страница getLog) выясняется общее количество
-        /// событий, затем запрашивается последняя страница журнала — там самые свежие события.
+        /// Аналог getEvent() из basoop.php: получить события журнала, накопившиеся с метки
+        /// fromTimestamp. Первым запросом (первая страница) выясняется общее количество событий,
+        /// затем забираются ВСЕ страницы, а не только одна: раньше за итерацию обрабатывалось
+        /// не более limit событий, поэтому накопление в 1000 событий требовало 20 запусков.
         /// fromTimestamp — метка времени в миллисекундах, взятая из BAS_PARAM.LASTEVENT
-        /// (в PHP это $this->getLastEventID()).
+        /// (в PHP это $this->getLastEventID()). Возвращается один ответ, в теле которого
+        /// list_items всех полученных страниц.
         /// </summary>
         public async Task<RestResponse> GetEvents(long fromTimestamp = 0, int limit = 50)
         {
@@ -310,13 +312,13 @@ namespace Basip
 
             // 1. Пробный запрос — аналог getTotalCount($this->getLog($from, 50)) в basoop.php.
             //    Сами события этой страницы не нужны: из ответа берётся только количество записей.
-            RestResponse probeResponse = await GetLog(fromTimestamp, limit, 1, 1);//последний параметр 1 - данные берутся для подсчета количества записей
+            RestResponse probeResponse = await GetLog(fromTimestamp, limit, 1, 1);//последний параметр 1 - данные берутся для подсчета количества записей. ЗАпрос в лог-файл НЕ записывается.
 
             if (probeResponse == null)
             {
                 // Панель не ответила: повторяем запрос, чтобы вернуть вызывающему коду
                 // штатный ответ устройства, а не null.
-                return await GetLog(fromTimestamp, limit, 1);
+                return await GetLog(fromTimestamp, limit, 1);//последний параметр  - данные берутся для разбора, данные в лог-файл записываются.
             }
 
             if (!probeResponse.IsSuccessful)
@@ -327,10 +329,17 @@ namespace Basip
 
             int totalEventCount = GetTotalCount(probeResponse);
 
-            // 2. Последняя страница журнала: ceil(total_items / limit), как в basoop.php
-            //    (там это page = ceil($totalEventCount / $this->limit)).
+            // 2. Забираем ВСЕ страницы журнала, накопившиеся с метки fromTimestamp, а не только
+            //    одну: иначе за итерацию обрабатывалось не более limit событий, и при большом
+            //    накоплении (например, 1000 событий при limit = 50) требовалось 20 запусков.
             long pageCount = (long)Math.Ceiling((double)totalEventCount / limit);
             if (pageCount < 1) pageCount = 1;
+
+            if (pageCount > MaxEventPagesPerRun)
+            {
+                logger.LogWarning($"340 GetEvents: накопилось {totalEventCount} событий ({pageCount} страниц), за одну итерацию забираются первые {MaxEventPagesPerRun} страниц, остальное — следующей итерацией");
+                pageCount = MaxEventPagesPerRun;
+            }
 
            // logger.LogTrace($"328 GetEvents: id_dev={id_dev} base_url={base_url}  from={fromTimestamp} количество событий={totalEventCount}, количество страниц={pageCount}");
             // Метка времени в журнале — в читаемом виде: в запрос к панели уходят
@@ -341,15 +350,70 @@ namespace Basip
 
             logger.LogTrace($"334 GetEvents: id_dev={id_dev} base_url={base_url} начиная с даты {fromText} (unix millis {fromTimestamp}) количество событий={totalEventCount}, количество страниц={pageCount}");
 
-            // Если все события укладываются в одну страницу, нужная страница уже получена
-            // пробным запросом — второй раз дёргать панель незачем (в basoop.php здесь
-            // всегда идёт повторный getLog).
-            if (pageCount == 1)
+            // Первая страница уже получена пробным запросом — она идёт в результат как есть.
+            JsonArray allItems = new JsonArray();
+            AppendItems(allItems, probeResponse);
+
+            for (long page = 2; page <= pageCount; page++)
             {
-                return probeResponse;
+                RestResponse pageResponse = await GetLog(fromTimestamp, limit, (int)page, 1);
+                if (pageResponse == null || !pageResponse.IsSuccessful)
+                {
+                    logger.LogWarning($"362 GetEvents: страница {page} из {pageCount} не получена, status={pageResponse?.StatusCode}, обработка продолжится по уже собранным событиям");
+                    break;
+                }
+
+                AppendItems(allItems, pageResponse);
+                logger.LogTrace($"367 GetEvents: страница {page} из {pageCount} получена, всего собрано событий={allItems.Count}");
             }
 
-            return await GetLog(fromTimestamp, limit, (int)pageCount);
+            logger.LogTrace($"370 GetEvents: собрано событий={allItems.Count} со страниц 1..{pageCount} (в журнале панели {totalEventCount})");
+
+            // Возвращаем один ответ со всеми событиями: Worker обрабатывает его как обычно.
+            return new RestResponse
+            {
+                Content = new JsonObject { ["list_items"] = allItems }.ToJsonString(),
+                StatusCode = probeResponse.StatusCode,
+                ResponseStatus = ResponseStatus.Completed
+            };
+        }
+
+        /// <summary>
+        /// Сколько страниц журнала максимум забирается за одну итерацию — страховка от
+        /// бесконечного цикла, если панель вернёт несогласованное количество записей.
+        /// Остаток событий забирается следующей итерацией.
+        /// </summary>
+        private const int MaxEventPagesPerRun = 200;
+
+        /// <summary>
+        /// Добавляет элементы list_items страницы в общий массив. Значения переносятся
+        /// из ответа как есть (JSON не пересобирается по полям).
+        /// </summary>
+        private static void AppendItems(JsonArray target, RestResponse? response)
+        {
+            if (response == null || string.IsNullOrWhiteSpace(response.Content))
+            {
+                return;
+            }
+
+            try
+            {
+                using JsonDocument document = JsonDocument.Parse(response.Content);
+                if (document.RootElement.ValueKind == JsonValueKind.Object &&
+                    document.RootElement.TryGetProperty("list_items", out JsonElement items) &&
+                    items.ValueKind == JsonValueKind.Array)
+                {
+                    foreach (JsonElement item in items.EnumerateArray())
+                    {
+                        target.Add(JsonNode.Parse(item.GetRawText()));
+                    }
+                }
+            }
+            catch (JsonException)
+            {
+                // Тело страницы не разобралось — эта страница просто не добавляется,
+                // остальные обрабатываются как обычно.
+            }
         }
 
         /// <summary>

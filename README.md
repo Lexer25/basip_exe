@@ -6,7 +6,7 @@
 
 basip keys services - это Windows-сервис для интеграции СКУД системы с панелями управления Bas-IP.
 
-Текущая версия приложения: 2.0.3.8 (задаётся в Basip.csproj; при каждом запуске она пишется
+Текущая версия приложения: 2.0.3.9 (задаётся в Basip.csproj; при каждом запуске она пишется
 в журнал строкой "Версия программы: ..." вместе с путём к исполняемому файлу).
 Версия установщика совпадает с версией приложения.
 
@@ -62,7 +62,7 @@ basip keys services - это Windows-сервис для интеграции С
 
 3. Сборка и установка (рекомендуемый способ):
    Запустите build.bat - он восстановит пакеты, опубликует приложение
-   в publish\win-x64 и соберёт установщик Output\BasipKeyServiceSetup_v2.0.3.8.exe.
+   в publish\win-x64 и соберёт установщик Output\BasipKeyServiceSetup_v2.0.3.9.exe.
    Установщик сам регистрирует службу с именем "Basip Key Service".
 
    Результат сборки - один файл publish\win-x64\basipkeysservices.exe размером ~5 МБ.
@@ -192,7 +192,7 @@ WRN (Warning), ERR (Error), FTL (Critical) - так уровень называ�
 Типовые сообщения в логах (примеры для id_dev=617):
 
 Старт/остановка службы:
-[INF][sys] Версия программы: 2.0.3.8. Исполняемый файл: C:\ArtonitSevices\basipkeysservices\basipkeysservices.exe
+[INF][sys] Версия программы: 2.0.3.9. Исполняемый файл: C:\ArtonitSevices\basipkeysservices\basipkeysservices.exe
 [INF][sys] 32 basip start: 09:10:00 deltasleep: 00:00:00, первый запуск: 2026-10-13 09:10:00
 [INF][sys] 33 Service basip write and delete card started
 [INF][sys] 126 timeout basip: 00:10:00, следующий запуск: 2026-10-13 17:35:00
