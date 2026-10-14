@@ -43,8 +43,10 @@ Source: "publish\win-x64\appsettings.json"; DestDir: "{app}"; Flags: ignoreversi
 Name: "{group}\Basip Key Service"; Filename: "{app}\basipkeysservices.exe"; Components: shortcuts
 ; Журнал пишется в C:\ProgramData\Basip\ArtonitBasIpTools.log (см. LogFolerPath в appsettings.json)
 Name: "{group}\Просмотр логов"; Filename: "{win}\notepad.exe"; Parameters: "{commonappdata}\Basip\ArtonitBasIpTools.log"; Components: shortcuts
-; Журнал процессов (категория Basip.Processing) ведётся отдельным файлом
-Name: "{group}\Просмотр журнала процессов"; Filename: "{win}\notepad.exe"; Parameters: "{commonappdata}\Basip\basipkeysservices.log"; Components: shortcuts
+; Журнал процессов (категория Basip.Processing) ведётся отдельным файлом с датой в имени:
+; basipkeysservices_ГГГГ_ММ_ДД.log. Открываем каталог журналов, потому что имя файла меняется
+; каждые сутки и заранее его указать в ярлыке нельзя.
+Name: "{group}\Просмотр журнала процессов"; Filename: "{win}\explorer.exe"; Parameters: "{commonappdata}\Basip"; Components: shortcuts
 Name: "{group}\Удаление Basip Service"; Filename: "{uninstallexe}"; Components: shortcuts
 
 [Run]
@@ -113,7 +115,7 @@ begin
            'Исполняемый файл: basipkeysservices.exe' + #13#10 + #13#10 +
            'Служба "Basip Key Service" установлена и запущена.' + #13#10 +
            'Логи будут сохраняться в: {commonappdata}\Basip\ArtonitBasIpTools.log' + #13#10 +
-           'Журнал процессов (обработка событий): {commonappdata}\Basip\basipkeysservices.log' + #13#10 +
+           'Журнал процессов (обработка событий): basipkeysservices_ГГГГ_ММ_ДД.log' + #13#10 +
            'Конфигурация: {app}\appsettings.json' + #13#10 + #13#10 +
            'ВАЖНО: если параметр Service:db_config в appsettings.json пуст, ' +
            'служба не сможет подключиться к базе данных. Заполните строку подключения ' +

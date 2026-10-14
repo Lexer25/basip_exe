@@ -2,6 +2,7 @@ using Basip;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Hosting.WindowsServices;
 using Microsoft.Extensions.Logging;
 
 IHost? host = null;
@@ -90,21 +91,46 @@ try
         ServiceDescriptor mainLogProvider = LastLogProvider(logging);
 
         // Журнал процессов: только категория Basip.Processing — сбор и разбор событий, дампы
-        // LogItem. Ведётся в отдельном файле (имя совпадает со службой: basipkeysservices),
-        // чтобы отладку не приходилось выискивать среди ошибок.
-        logging.AddFile(
-            pathFormat: $"{logFile.Folder}\\basipkeysservices.log",
-            minimumLevel: processLogLevel,
-            retainedFileCountLimit: retainedFileCount,
-            outputTemplate: outputTemplate);
-        ServiceDescriptor processLogProvider = LastLogProvider(logging);
+        // LogItem. Ведётся своим приёмником, а не Serilog: имя файла должно быть
+        // basipkeysservices_ГГГГ_ММ_ДД.log, а Serilog-приёмник (AddFile) всегда добавляет дату
+        // как "ГГГГММДД" через дефис и своего формата даты не поддерживает.
+        logging.AddProvider(new ProcessLogFileProvider(logFile.Folder, processLogLevel, retainedFileCount));
 
         // Все зарегистрированные провайдеры оборачиваются, чтобы метка id_dev/[sys] была
         // в каждой строке журнала, включая записи хоста (Hosting, Application lifetime),
-        // которые создаются не нашим кодом. Файловые приёмники дополнительно делят записи
-        // по категории: процесс — в свой файл, всё остальное — в основной.
-        WrapLogProviders(logging, mainLogProvider, processLogProvider);
+        // которые создаются не нашим кодом. Основной файловый журнал дополнительно
+        // не получает записи процессов: их ведёт журнал процессов.
+        WrapLogProviders(logging, mainLogProvider);
     }).Build();
+
+    // Старт и остановка самой программы (службы) — отдельно от строк Worker'а "32 старт Worker":
+    // Worker может вообще не дойти до своей первой строки (служба не стартовала из-за настроек,
+    // недоступна БД), а факт запуска и остановки службы должен быть в журнале в любом случае.
+    // Записи ведутся в журнал процессов (LogCategories.Processing); чтобы они шли в основной
+    // журнал, достаточно взять другую категорию, например "Basip.Lifecycle".
+    ILogger programLogger = host.Services.GetRequiredService<ILoggerFactory>().CreateLogger(LogCategories.Processing);
+    DateTime programStartedAt = DateTime.Now;
+
+    // Запись о старте делается до RunAsync: она первая в журнале и не зависит от того,
+    // что успел сделать Worker. Режим важен при разборе: служба Windows или запуск в консоли.
+    programLogger.LogInformation(
+        "Старт программы (службы) basip. Версия: {Version}; режим: {Mode}; файл: {Executable}; время старта: {Started:yyyy-MM-dd HH:mm:ss}",
+        ApplicationInfo.Version,
+        WindowsServiceHelpers.IsWindowsService() ? "служба Windows" : "консоль",
+        ApplicationInfo.ExecutablePath,
+        programStartedAt);
+
+    // Остановка пишется по ApplicationStopping: хост вызывает его до закрытия приёмников
+    // журнала (после RunAsync писать в файл уже поздно — провайдеры закрыты). Подписка
+    // оформляется до RunAsync, иначе мгновенная остановка осталась бы без записи.
+    host.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.Register(() =>
+    {
+        TimeSpan uptime = DateTime.Now - programStartedAt;
+        programLogger.LogInformation(
+            "Остановка программы (службы) basip. Время работы: {Uptime}; время остановки: {Stopped:yyyy-MM-dd HH:mm:ss}",
+            $"{(int)uptime.TotalHours:00}:{uptime.Minutes:00}:{uptime.Seconds:00}",
+            DateTime.Now);
+    });
 
     await host.RunAsync();
 }
@@ -140,7 +166,7 @@ static ServiceDescriptor LastLogProvider(ILoggingBuilder logging)
 
 // Оборачивает все зарегистрированные провайдеры журнала: метка панели должна попадать
 // и в записи, которые создаёт не наш код (хост, жизненный цикл приложения).
-static void WrapLogProviders(ILoggingBuilder logging, ServiceDescriptor mainLogProvider, ServiceDescriptor processLogProvider)
+static void WrapLogProviders(ILoggingBuilder logging, ServiceDescriptor mainLogProvider)
 {
     List<ServiceDescriptor> providers = logging.Services
         .Where(descriptor => descriptor.ServiceType == typeof(ILoggerProvider))
@@ -150,13 +176,13 @@ static void WrapLogProviders(ILoggingBuilder logging, ServiceDescriptor mainLogP
     {
         logging.Services.Remove(descriptor);
 
-        // Маршрут записей задаётся только файловым журналам: консоль и остальные приёмники
+        // Маршрут записей задаётся только основному файловому журналу: записи процессов
+        // он получать не должен. Журнал процессов отбирает свою категорию сам
+        // (см. ProcessLogFileProvider.CreateLogger), а консоль и остальные приёмники
         // (например, журнал событий Windows) получают всё, как и раньше.
-        Func<string, bool>? route = ReferenceEquals(descriptor, processLogProvider)
-            ? LogCategories.IsProcessing
-            : ReferenceEquals(descriptor, mainLogProvider)
-                ? category => !LogCategories.IsProcessing(category)
-                : null;
+        Func<string, bool>? route = ReferenceEquals(descriptor, mainLogProvider)
+            ? category => !LogCategories.IsProcessing(category)
+            : null;
 
         logging.Services.Add(ServiceDescriptor.Describe(
             typeof(ILoggerProvider),

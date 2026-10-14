@@ -35,7 +35,7 @@ namespace Basip
             debugLogger = loggerFactory.CreateLogger(Device.DebugLogCategory);
 
             // Отдельная категория для журнала процессов: эти записи ведутся в своём файле
-            // (basipkeysservices-ГГГГММДД.log) и управляются параметром Log:ProcessLogLevel.
+            // (basipkeysservices_ГГГГ_ММ_ДД.log) и управляются параметром Log:ProcessLogLevel.
             processingLogger = loggerFactory.CreateLogger(LogCategories.Processing);
 
             version = ApplicationInfo.Version;
@@ -87,7 +87,7 @@ namespace Basip
         {
             // Время первого запуска указывается явно: при run_now = false служба ждёт timestart.
             DateTime firstRun = DateTime.Now.Add(deltasleep);
-            processingLogger.LogInformation(@$"32 basip start: {timestart} deltasleep: {deltasleep}, первый запуск: {firstRun:yyyy-MM-dd HH:mm:ss}");
+            processingLogger.LogInformation(@$"32 старт Worker: {timestart} deltasleep: {deltasleep}, первый запуск: {firstRun:yyyy-MM-dd HH:mm:ss}");
             processingLogger.LogInformation(@$"33 Служба записи и удаления карт и сбора события запущена.");
 
             // Ожидание старта прерывается остановкой службы, иначе Task.Delay
@@ -123,8 +123,8 @@ namespace Basip
             }
             catch (Exception e)
             {
-                logger.LogError("104 No connect database: " + options.db_config);
-                logger.LogError(e.ToString());
+                logger.LogCritical("104 No connect database: " + options.db_config);
+                logger.LogCritical(e.ToString());
                 lifetime.StopApplication();
                 return;
             }
@@ -154,7 +154,7 @@ namespace Basip
                 await Task.Delay(timeout, stoppingToken);
             }
 
-            logger.LogCritical(@$"49 basip stop");
+            logger.LogCritical(@$"49 остановка Worker");
         }
 
         private void run(DB db)
@@ -179,7 +179,7 @@ namespace Basip
 
                     if (row["IP"] == DBNull.Value || Convert.ToInt32(row["IP"]) == 0)
                     {
-                        logger.LogDebug($"149-0 Skipping device ID {rowDeviceId} - no IP address");
+                        logger.LogWarning($"149-0 Skipping device ID {rowDeviceId} - no IP address");
                         continue;
                     }
                     logger.LogDebug($"149-1  device ID {rowDeviceId} IP {rowDeviceId} is OK");
@@ -189,7 +189,7 @@ namespace Basip
                 }
                 catch (Exception ex)
                 {
-                    logger.LogDebug($"149-3 Failed to create device from row ID {row["id_dev"]}: {ex.Message}");
+                    logger.LogCritical($"149-3 Failed to create device from row ID {row["id_dev"]}: {ex.Message}");
                     continue;
                 }
             }
@@ -202,7 +202,7 @@ namespace Basip
             }
             else
             {
-                logger.LogInformation("172 No devices with valid IP addresses found");
+                logger.LogWarning("172 No devices with valid IP addresses found");
                 return;
             }
         }
@@ -234,14 +234,14 @@ namespace Basip
             if (!isAuthenticated)
             {
                 auth = "Auth ERR";
-                logger.LogInformation($"211 id_dev={dev.id_dev} Device {dev.base_url} auth failed");
+                logger.LogCritical($"211 id_dev={dev.id_dev} Device {dev.base_url} auth failed");
                 dbForEvents.FixDeviceErr("Auth ERR", currentDeviceId);
                 return;
             }
 
             if (!dev.is_online)
             {
-                logger.LogDebug($"216 id_dev={dev.id_dev} Device {dev.base_url} offline");
+                logger.LogWarning($"216 id_dev={dev.id_dev} Device {dev.base_url} offline");
                 dbForEvents.FixDeviceErr("Devcice offline", currentDeviceId);
                 return;
             }
