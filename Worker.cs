@@ -20,6 +20,9 @@ namespace Basip
         private readonly string version;
         private readonly ILogger debugLogger;
 
+        /// <summary>Журнал процессов: подробности обработки событий ведутся отдельно от ошибок.</summary>
+        private readonly ILogger processingLogger;
+
         public Worker(ILogger<Worker> logger, WorkerOptions options, IHostApplicationLifetime lifetime, ILoggerFactory loggerFactory)
         {
             // Метку id_dev/[sys] добавляет обёртка провайдеров журнала (см. Program.cs),
@@ -30,6 +33,10 @@ namespace Basip
 
             // Отдельная категория для отладочного вывода Device: запись идёт с уровнем Trace.
             debugLogger = loggerFactory.CreateLogger(Device.DebugLogCategory);
+
+            // Отдельная категория для журнала процессов: эти записи ведутся в своём файле
+            // (basipkeysservices-ГГГГММДД.log) и управляются параметром Log:ProcessLogLevel.
+            processingLogger = loggerFactory.CreateLogger(LogCategories.Processing);
 
             version = ApplicationInfo.Version;
 
@@ -80,8 +87,8 @@ namespace Basip
         {
             // Время первого запуска указывается явно: при run_now = false служба ждёт timestart.
             DateTime firstRun = DateTime.Now.Add(deltasleep);
-            logger.LogInformation(@$"32 basip start: {timestart} deltasleep: {deltasleep}, первый запуск: {firstRun:yyyy-MM-dd HH:mm:ss}");
-            logger.LogInformation(@$"33 Service basip write and delete card started");
+            processingLogger.LogInformation(@$"32 basip start: {timestart} deltasleep: {deltasleep}, первый запуск: {firstRun:yyyy-MM-dd HH:mm:ss}");
+            processingLogger.LogInformation(@$"33 Служба записи и удаления карт и сбора события запущена.");
 
             // Ожидание старта прерывается остановкой службы, иначе Task.Delay
             // задерживал бы штатное завершение на весь deltasleep.
@@ -93,7 +100,7 @@ namespace Basip
 
             try
             {
-                logger.LogInformation($"84 Версия приложения basip: {version}");
+                processingLogger.LogInformation($"84 Версия приложения basip: {version}");
 
                 // Создаем экземпляр DB с connection string
                 db = new DB(options.db_config ?? string.Empty, logger);
@@ -112,7 +119,7 @@ namespace Basip
 
                 // Получаем устройства один раз при старте
                 devices = db.GetDevice().Rows;
-                logger.LogInformation("71 Зарегистрировано панелей bas-ip: " + devices.Count + " шт.");
+                processingLogger.LogInformation("71 Зарегистрировано панелей bas-ip: " + devices.Count + " шт.");
             }
             catch (Exception e)
             {
@@ -143,6 +150,7 @@ namespace Basip
                 // считать по строке timeout в уме. Дата нужна на случай перехода через полночь.
                 DateTime nextRun = DateTime.Now.Add(timeout);
                 logger.LogInformation($@"126 timeout basip: {timeout}, следующий запуск: {nextRun:yyyy-MM-dd HH:mm:ss}");
+                processingLogger.LogInformation($@"126 timeout basip: {timeout}, следующий запуск: {nextRun:yyyy-MM-dd HH:mm:ss}");
                 await Task.Delay(timeout, stoppingToken);
             }
 
@@ -214,7 +222,7 @@ namespace Basip
             JsonDocument? deviceInfo = await dev.GetInfo();
             if (deviceInfo == null)
             {
-                logger.LogInformation($"192 id_dev={dev.id_dev} IP {dev.base_url} - нет связи. ");
+                processingLogger.LogInformation($"192 id_dev={dev.id_dev} IP {dev.base_url} - нет связи. ");
                 dbForEvents.FixDeviceErr("Device not connected", currentDeviceId);
                 dbForEvents.SetOnlineState(currentDeviceId, 0);
                 return;
@@ -552,7 +560,7 @@ namespace Basip
             string cardId = GetCardId(card);
             string delcommandlog = $@"deletekey id_dev ={deviceId} BASE_URL {dev.base_url} key = ""{options.uidtransform(cardId)}""";
 
-            logger.LogInformation("503 "+delcommandlog + "GetInfoCard " + "major api=\"" + majorVersion + "\"");
+            processingLogger.LogInformation("503 "+delcommandlog + "GetInfoCard " + "major api=\"" + majorVersion + "\"");
 
             RestResponse? content = await dev.GetInfoCard(options.uidtransform(cardId), majorVersion);
 
@@ -586,26 +594,26 @@ namespace Basip
 
                         if (uidToDelete != null)
                         {
-                            logger.LogInformation($"528 {delcommandlog}" + $@" для карты {cardId} uid ={uidToDelete} DeleteCard major api = {majorVersion}");
+                            processingLogger.LogInformation($"528 {delcommandlog}" + $@" для карты {cardId} uid ={uidToDelete} DeleteCard major api = {majorVersion}");
 
                             var status = (await dev.DeleteCard(uidToDelete)).StatusCode;
 
                             switch (status)
                             {
                                 case HttpStatusCode.OK:
-                                    logger.LogDebug($@"535 {delcommandlog}   Answer: OK uid={uidToDelete}");
+                                    processingLogger.LogDebug($@"535 {delcommandlog}   Answer: OK uid={uidToDelete}");
                                     db.DeleteCardInDev((int)card["id_cardindev"]);
-                                    logger.LogInformation($"537 Card {cardId} successfully processed and removed from queue for device {deviceId}");
+                                    processingLogger.LogInformation($"537 Card {cardId} successfully processed and removed from queue for device {deviceId}");
                                     break;
                                 default:
-                                    logger.LogDebug($@"540 Answer destination: {delcommandlog} Answer: ERR uid={uidToDelete} no delete");
+                                    processingLogger.LogDebug($@"540 Answer destination: {delcommandlog} Answer: ERR uid={uidToDelete} no delete");
                                     db.UpdateCardInDevIncrement((int)card["id_cardindev"]);
                                     break;
                             }
                         }
                         else
                         {
-                            logger.LogDebug($@"547 {delcommandlog} Answer: OK no card in panel");
+                            processingLogger.LogDebug($@"547 {delcommandlog} Answer: OK no card in panel");
                             db.DeleteCardInDev((int)card["id_cardindev"]);
                             logger.LogInformation($"Card {cardId} successfully processed and removed from queue for device {deviceId}");
                         }
@@ -682,10 +690,20 @@ namespace Basip
                 string eventType = logEvent.name?.key ?? "Unknown";
                 DateTime dateTime = DateTimeOffset.FromUnixTimeMilliseconds(logEvent.timestamp).LocalDateTime;
                
-                string note = $"Device=\"{dev.name}\", Type={eventType} " +
+                /*
+                 string note = $"Device=\"{dev.name}\", Type={eventType} " +
                               $"Readdate=#{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}# " +
                               $"DeviceDate =#{dateTime:yyyy-MM-dd HH:mm:ss}# " +
                               $"RowDeviceDate = {logEvent.timestamp}";
+                */
+
+                string note = $"Device=\"{dev.name}\", " +
+                              $"EventType=\"{eventCode}\", "+
+                              $"Readdate=#{DateTimeOffset.Now:yyyy-MM-dd HH:mm:ss}#, " +
+                              $"DeviceDate =#{dateTime:yyyy-MM-dd HH:mm:ss}#, " +
+                              $"RowDeviceDate = {logEvent.timestamp}";
+
+
 
                 if (eventCode > 0)
                 {
@@ -707,29 +725,47 @@ namespace Basip
 
                     int insertedId = insertedEventTypeId ?? 0;
 
-                    if (eventType != "successful_login_api_call")
+                  /*  if (eventType != "successful_login_api_call")
                     {
                         if (cardNumber != null)
                         {
-                            logger.LogInformation($"703 +{note}, Card={cardNumber}, EventType={eventCode}, Id_Event={insertedId},  major api = {majorVersion}, id_dev={dev.id_dev}");
+                            processingLogger.LogInformation($"703 +{note}, EventType={eventCode}, Card={cardNumber},  Id_Event={insertedId},  major api = {majorVersion}, id_dev={dev.id_dev}");
                         }
                         else
                         {
-                            logger.LogInformation($"711 +{note}, EventType={eventCode}, Id_Event={insertedId}, major api = {majorVersion}");
+                            processingLogger.LogInformation($"711 +{note}, EventType={eventCode}, Id_Event={insertedId},  major api = {majorVersion}");
                         }
                     }
+                  */
 
                     if (insertedEventTypeId.HasValue)
                     {
-                        logger.LogInformation($"718 Event saved: Dev={deviceId}, Type={eventCode}, EventType={eventCode}, Id_Event={insertedEventTypeId.Value}, major api = {majorVersion}");
+                        if (cardNumber != null)
+                        {
+                            processingLogger.LogInformation($"703 +{note},  Card={cardNumber}, major api = {majorVersion}, id_dev={dev.id_dev};  Id_Event_insert={insertedId}");
+                        }
+                        else
+                        {
+                            processingLogger.LogInformation($"711 +{note}, major api = {majorVersion};  Id_Event_insert={insertedId}");
+                        }
+
+                        //processingLogger.LogInformation($"718 Event saved: Dev={deviceId}, Type={eventCode}, EventType={eventCode}, Id_Event={insertedEventTypeId.Value}, RowDeviceDate={logEvent.timestamp}, major api = {majorVersion}");
                     }
                     else
                     {
-                        logger.LogError($"722 Failed to save event: Dev={deviceId}, EventType={eventCode}, major api = {majorVersion} ");
+                        if (cardNumber != null)
+                        {
+                            processingLogger.LogInformation($"703 +{note},  Card={cardNumber},  major api = {majorVersion}, id_dev={dev.id_dev};  Id_Event_insert=Failed to save");
+                        }
+                        else
+                        {
+                            processingLogger.LogInformation($"711 +{note},  major api = {majorVersion}; Id_Event_insert=Failed to save");
+                        }
+                        //processingLogger.LogError($"722 Failed to save event: Dev={deviceId}, EventType={eventCode}, major api = {majorVersion} ");
                     }
                 } else
                 {
-                    logger.LogInformation($"741 -{note}, Card={cardNumber}, EventType={eventCode}, Id_Event=,  major api = {majorVersion}, id_dev={dev.id_dev}");
+                    //processingLogger.LogInformation($"741 -{note}, Card={cardNumber}, EventType={eventCode}, Id_Event=,  major api = {majorVersion}, id_dev={dev.id_dev}");
                 }
             }
 

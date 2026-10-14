@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Basip
 {
@@ -148,5 +149,53 @@ namespace Basip
             items.Add(new KeyValuePair<string, object?>(DeviceIdPropertyName, mark));
             return items;
         }
+    }
+
+    /// <summary>Категории журнала, которые ведутся отдельно от остальных записей.</summary>
+    public static class LogCategories
+    {
+        /// <summary>
+        /// Журнал процессов: подробности обработки панелей и событий. Ведётся в отдельном файле
+        /// (см. Program.cs), поэтому отладочный поток не смешивается с ошибками.
+        /// </summary>
+        public const string Processing = "Basip.Processing";
+
+        /// <summary>Признак того, что категория относится к журналу процессов (учитываются и подкатегории).</summary>
+        public static bool IsProcessing(string categoryName) =>
+            categoryName.Equals(Processing, StringComparison.OrdinalIgnoreCase) ||
+            categoryName.StartsWith(Processing + ".", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Провайдер-обёртка для разделения журналов: запись уходит во вложенный провайдер, только
+    /// если её категория проходит проверку. Нужна потому, что фильтр по типу провайдера
+    /// (AddFilter&lt;FileLoggerProvider&gt;) после обёртывания в <see cref="DeviceScopedLoggerProvider"/>
+    /// не работает: правило привязано к имени типа провайдера, а в фабрике оказывается тип обёртки.
+    /// </summary>
+    public sealed class CategoryFilterLoggerProvider : ILoggerProvider, ISupportExternalScope
+    {
+        private readonly ILoggerProvider inner;
+        private readonly Func<string, bool> accept;
+
+        public CategoryFilterLoggerProvider(ILoggerProvider inner, Func<string, bool> accept)
+        {
+            this.inner = inner;
+            this.accept = accept;
+        }
+
+        /// <summary>Для неподходящих категорий возвращается пустой логгер: запись никуда не идёт.</summary>
+        public ILogger CreateLogger(string categoryName) =>
+            accept(categoryName) ? inner.CreateLogger(categoryName) : NullLogger.Instance;
+
+        /// <summary>Области видимости передаются вложенному провайдеру, если он их поддерживает.</summary>
+        public void SetScopeProvider(IExternalScopeProvider scopeProvider)
+        {
+            if (inner is ISupportExternalScope support)
+            {
+                support.SetScopeProvider(scopeProvider);
+            }
+        }
+
+        public void Dispose() => inner.Dispose();
     }
 }

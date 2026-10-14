@@ -6,7 +6,7 @@
 
 basip keys services - это Windows-сервис для интеграции СКУД системы с панелями управления Bas-IP.
 
-Текущая версия приложения: 2.0.4.0 (задаётся в Basip.csproj; при каждом запуске она пишется
+Текущая версия приложения: 2.0.5.0 (задаётся в Basip.csproj; при каждом запуске она пишется
 в журнал строкой "Версия программы: ..." вместе с путём к исполняемому файлу).
 Версия установщика совпадает с версией приложения.
 
@@ -62,7 +62,7 @@ basip keys services - это Windows-сервис для интеграции С
 
 3. Сборка и установка (рекомендуемый способ):
    Запустите build.bat - он восстановит пакеты, опубликует приложение
-   в publish\win-x64 и соберёт установщик Output\BasipKeyServiceSetup_v2.0.4.0.exe.
+   в publish\win-x64 и соберёт установщик Output\BasipKeyServiceSetup_v2.0.5.0.exe.
    Установщик сам регистрирует службу с именем "Basip Key Service".
 
    Результат сборки - один файл publish\win-x64\basipkeysservices.exe размером ~5 МБ.
@@ -101,6 +101,7 @@ basip keys services - это Windows-сервис для интеграции С
   "Log": {
     "LogFolerPath": "C:\\ProgramData\\Basip\\",
     "LogLevel": "Debug",                  // уровень журнала для наших категорий (Basip.*)
+    "ProcessLogLevel": "Debug",           // уровень журнала процессов (Basip.Processing)
     "retainedFileCountLimit": 7
   },
   "Service": {
@@ -136,6 +137,10 @@ basip keys services - это Windows-сервис для интеграции С
 - LogLevel - уровень журнала для категорий приложения (Basip.*): Worker, DB, Device,
   Basip.DebugOutput, StartupFailureService. По умолчанию Information.
   Именно этот параметр включает подробную отладку (Trace и Debug) в файле и в консоли
+- ProcessLogLevel - уровень журнала процессов (категория Basip.Processing): подробности сбора
+  и разбора событий, дампы LogItem. Эти записи ведутся отдельным файлом
+  basipkeysservices-ГГГГММДД.log, поэтому отладку процессов можно держать включённой,
+  не смешивая её с ошибками. По умолчанию равно Log:LogLevel
 - retainedFileCountLimit - количество хранимых файлов логов
 
 Раздел "Logging" (необязательный):
@@ -192,7 +197,7 @@ WRN (Warning), ERR (Error), FTL (Critical) - так уровень называ�
 Типовые сообщения в логах (примеры для id_dev=617):
 
 Старт/остановка службы:
-[INF][sys] Версия программы: 2.0.4.0. Исполняемый файл: C:\ArtonitSevices\basipkeysservices\basipkeysservices.exe
+[INF][sys] Версия программы: 2.0.5.0. Исполняемый файл: C:\ArtonitSevices\basipkeysservices\basipkeysservices.exe
 [INF][sys] 32 basip start: 09:10:00 deltasleep: 00:00:00, первый запуск: 2026-10-13 09:10:00
 [INF][sys] 33 Service basip write and delete card started
 [INF][sys] 126 timeout basip: 00:10:00, следующий запуск: 2026-10-13 17:35:00
@@ -204,7 +209,9 @@ WRN (Warning), ERR (Error), FTL (Critical) - так уровень называ�
 [INF][617] 240 id_dev=617 Device http://192.168.68.2:80 apiVersion: 1.3.5, major: 1, middle: 3
 [DBG][617] 288 id_dev=617 major api для обработки событий = 1
 
-Сбор событий и запросы к панели (уровень Trace, то есть Log:LogLevel = Trace):
+Сбор событий и запросы к панели (эти строки пишутся в журнал процессов
+basipkeysservices-ГГГГММДД.log; уровень задаётся параметром Log:ProcessLogLevel, для Trace -
+Log:ProcessLogLevel = Trace):
 [VRB][617] 264 id_dev=617 Старт сбор событий IP: http://192.168.68.2:80 начиная с метки времени 2026-10-13 12:29:57
 [VRB][617] 443 === REQUEST DETAILS === ... QueryString: filter = timestamp+ge+1790802000000 ...
 [VRB][617] 455 GetLog result: status=OK, body={"list_option":...,"list_items":[...]}
@@ -247,7 +254,10 @@ WRN (Warning), ERR (Error), FTL (Critical) - так уровень называ�
   недоступен на запись, используется первый доступный - см. Log:LogFolerPath)
 - Имя файла: ArtonitBasIpTools-ГГГГММДД.log (дату в имя добавляет файловый провайдер,
   поэтому файл заводится на каждые сутки)
-- Ротация: сохраняются последние retainedFileCountLimit файлов (по умолчанию 7)
+- Журнал процессов: basipkeysservices-ГГГГММДД.log в том же каталоге. В нём только записи
+  категории Basip.Processing (сбор и разбор событий, дампы LogItem); уровень - Log:ProcessLogLevel.
+  Ярлык "Просмотр журнала процессов" в меню Пуск указывает на этот файл
+- Ротация: сохраняются последние retainedFileCountLimit файлов (по умолчанию 7) по каждому журналу
 - Формат: ДД-ММ-ГГГГ ЧЧ:мм:сс.fff - [УРОВЕНЬ][метка] сообщение
 - Ошибки запуска (незаполненный Service:db_config, повреждённый appsettings.json) пишутся
   в этот же файл, а служба завершается с кодом возврата 1, а не падает с необработанным
@@ -263,7 +273,8 @@ WRN (Warning), ERR (Error), FTL (Critical) - так уровень называ�
 - либо работать с копией базы, в которой оставлена только нужная панель (безопасно для
   боевых данных);
 - если нужно только читать журнал по одной панели, ничего менять не надо: выбрать строки
-  по метке, например Select-String -Path .\ArtonitBasIpTools-*.log -Pattern '\[617\]'.
+  по метке, например Select-String -Path .\ArtonitBasIpTools-*.log -Pattern '\[617\]'
+  (так же и по журналу процессов: Select-String -Path .\basipkeysservices-*.log -Pattern '\[617\]').
 
 При отладке сбора событий держите Service:clear_log = false, иначе служба очищает журнал
 событий панели после обработки и повторный прогон тех же событий уже не увидит.

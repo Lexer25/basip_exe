@@ -47,6 +47,14 @@ try
             ?? LogLevel.Information;
         logging.AddFilter("Basip", applicationLogLevel);
 
+        // Уровень журнала процессов (категория Basip.Processing) задаётся отдельно от
+        // Log:LogLevel: подробности обработки панелей и событий можно держать включёнными,
+        // не заливая ими основной журнал, где остаются ошибки и сообщения о работе.
+        // По умолчанию уровень процессов совпадает с Log:LogLevel.
+        LogLevel processLogLevel = context.Configuration.GetSection("Log").GetValue<LogLevel?>("ProcessLogLevel")
+            ?? applicationLogLevel;
+        logging.AddFilter(LogCategories.Processing, processLogLevel);
+
         // Каталог журнала проверяется пробной записью: если Log:LogFolerPath недоступен
         // (нет прав, каталог не создаётся), файловый провайдер молча ничего не писал и
         // запись об ошибке запуска оставалась только в консоли. В этом случае журнал
@@ -67,19 +75,35 @@ try
             StartupConfiguration.Write(LogLevel.Warning, $"[sys] {logFile.Warning}", logFile);
         }
 
+        // Формат строки у обоих файловых журналов один и тот же: метка панели выводится
+        // сразу после уровня ("[DBG][127] текст"). Свойство id_dev подставляет обёртка
+        // DeviceScopedLogger (см. ниже), у записей вне обработки панели оно равно "[sys]".
+        const string outputTemplate = $"{{Timestamp:dd-MM-yyyy HH:mm:ss.fff}}\t-\t[{{Level:u3}}]{{{DeviceScopedLogger.DeviceIdPropertyName}}} {{Message}}{{NewLine}}{{Exception}}";
+        int? retainedFileCount = context.Configuration.GetSection("Log").GetValue<int?>("retainedFileCountLimit");
+
+        // Основной журнал: ошибки, проблемы и сообщения о работе — всё, кроме процессов.
         logging.AddFile(
-            // Метка панели выводится сразу после уровня: "[DBG][127] текст".
-            // Свойство id_dev подставляет обёртка DeviceScopedLogger (см. ниже),
-            // у записей вне обработки панели оно равно "[sys]".
             pathFormat: $"{logFile.Folder}\\ArtonitBasIpTools.log",
-            minimumLevel: context.Configuration.GetSection("Log").GetValue<LogLevel?>("LogLevel") ?? LogLevel.Information,
-            retainedFileCountLimit: context.Configuration.GetSection("Log").GetValue<int?>("retainedFileCountLimit"),
-            outputTemplate: $"{{Timestamp:dd-MM-yyyy HH:mm:ss.fff}}\t-\t[{{Level:u3}}]{{{DeviceScopedLogger.DeviceIdPropertyName}}} {{Message}}{{NewLine}}{{Exception}}");
+            minimumLevel: applicationLogLevel,
+            retainedFileCountLimit: retainedFileCount,
+            outputTemplate: outputTemplate);
+        ServiceDescriptor mainLogProvider = LastLogProvider(logging);
+
+        // Журнал процессов: только категория Basip.Processing — сбор и разбор событий, дампы
+        // LogItem. Ведётся в отдельном файле (имя совпадает со службой: basipkeysservices),
+        // чтобы отладку не приходилось выискивать среди ошибок.
+        logging.AddFile(
+            pathFormat: $"{logFile.Folder}\\basipkeysservices.log",
+            minimumLevel: processLogLevel,
+            retainedFileCountLimit: retainedFileCount,
+            outputTemplate: outputTemplate);
+        ServiceDescriptor processLogProvider = LastLogProvider(logging);
 
         // Все зарегистрированные провайдеры оборачиваются, чтобы метка id_dev/[sys] была
         // в каждой строке журнала, включая записи хоста (Hosting, Application lifetime),
-        // которые создаются не нашим кодом.
-        WrapLogProviders(logging);
+        // которые создаются не нашим кодом. Файловые приёмники дополнительно делят записи
+        // по категории: процесс — в свой файл, всё остальное — в основной.
+        WrapLogProviders(logging, mainLogProvider, processLogProvider);
     }).Build();
 
     await host.RunAsync();
@@ -99,9 +123,24 @@ finally
 
 return Environment.ExitCode;
 
+// Последний зарегистрированный приёмник журнала — тот, который только что добавил AddFile
+// (он регистрирует ILoggerProvider одиночным дескриптором через AddProvider).
+static ServiceDescriptor LastLogProvider(ILoggingBuilder logging)
+{
+    for (int i = logging.Services.Count - 1; i >= 0; i--)
+    {
+        if (logging.Services[i].ServiceType == typeof(ILoggerProvider))
+        {
+            return logging.Services[i];
+        }
+    }
+
+    throw new InvalidOperationException("Файловый приёмник журнала не зарегистрирован.");
+}
+
 // Оборачивает все зарегистрированные провайдеры журнала: метка панели должна попадать
 // и в записи, которые создаёт не наш код (хост, жизненный цикл приложения).
-static void WrapLogProviders(ILoggingBuilder logging)
+static void WrapLogProviders(ILoggingBuilder logging, ServiceDescriptor mainLogProvider, ServiceDescriptor processLogProvider)
 {
     List<ServiceDescriptor> providers = logging.Services
         .Where(descriptor => descriptor.ServiceType == typeof(ILoggerProvider))
@@ -110,11 +149,33 @@ static void WrapLogProviders(ILoggingBuilder logging)
     foreach (ServiceDescriptor descriptor in providers)
     {
         logging.Services.Remove(descriptor);
+
+        // Маршрут записей задаётся только файловым журналам: консоль и остальные приёмники
+        // (например, журнал событий Windows) получают всё, как и раньше.
+        Func<string, bool>? route = ReferenceEquals(descriptor, processLogProvider)
+            ? LogCategories.IsProcessing
+            : ReferenceEquals(descriptor, mainLogProvider)
+                ? category => !LogCategories.IsProcessing(category)
+                : null;
+
         logging.Services.Add(ServiceDescriptor.Describe(
             typeof(ILoggerProvider),
-            services => new DeviceScopedLoggerProvider(CreateLogProvider(descriptor, services)),
+            services => WrapLogProvider(descriptor, services, route),
             descriptor.Lifetime));
     }
+}
+
+// Каждый приёмник получает метку id_dev/[sys], а файловые — ещё и разделение по категориям.
+static ILoggerProvider WrapLogProvider(ServiceDescriptor descriptor, IServiceProvider services, Func<string, bool>? route)
+{
+    ILoggerProvider provider = CreateLogProvider(descriptor, services);
+
+    if (route != null)
+    {
+        provider = new CategoryFilterLoggerProvider(provider, route);
+    }
+
+    return new DeviceScopedLoggerProvider(provider);
 }
 
 static ILoggerProvider CreateLogProvider(ServiceDescriptor descriptor, IServiceProvider services)

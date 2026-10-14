@@ -1,11 +1,11 @@
 [Setup]
 AppName=Basip Key Service
-AppVersion=2.0.4.0
+AppVersion=2.0.5.0
 AppPublisher=ООО "Артсек"
 DefaultDirName={commonpf}\Basip Key Service
 DefaultGroupName=Basip Key Service
 OutputDir=Output
-OutputBaseFilename=BasipKeyServiceSetup_v2.0.4.0
+OutputBaseFilename=BasipKeyServiceSetup_v2.0.5.0
 Compression=lzma2/max
 SolidCompression=yes
 PrivilegesRequired=admin
@@ -13,11 +13,11 @@ WizardStyle=modern
 DisableWelcomePage=no
 DisableDirPage=no
 DisableProgramGroupPage=no
-VersionInfoVersion=2.0.4.0
+VersionInfoVersion=2.0.5.0
 VersionInfoCompany=ООО "Артсек"
 VersionInfoDescription=Service for working with Bas-IP devices
 VersionInfoProductName=Basip Key Service
-VersionInfoProductVersion=2.0.4.0
+VersionInfoProductVersion=2.0.5.0
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -43,12 +43,14 @@ Source: "publish\win-x64\appsettings.json"; DestDir: "{app}"; Flags: ignoreversi
 Name: "{group}\Basip Key Service"; Filename: "{app}\basipkeysservices.exe"; Components: shortcuts
 ; Журнал пишется в C:\ProgramData\Basip\ArtonitBasIpTools.log (см. LogFolerPath в appsettings.json)
 Name: "{group}\Просмотр логов"; Filename: "{win}\notepad.exe"; Parameters: "{commonappdata}\Basip\ArtonitBasIpTools.log"; Components: shortcuts
+; Журнал процессов (категория Basip.Processing) ведётся отдельным файлом
+Name: "{group}\Просмотр журнала процессов"; Filename: "{win}\notepad.exe"; Parameters: "{commonappdata}\Basip\basipkeysservices.log"; Components: shortcuts
 Name: "{group}\Удаление Basip Service"; Filename: "{uninstallexe}"; Components: shortcuts
 
 [Run]
 ; Установка службы (только если выбран компонент service)
 Filename: "sc"; Parameters: "create ""Basip Key Service"" binPath= ""{app}\basipkeysservices.exe"" start= auto DisplayName= ""Basip Key Service"""; Flags: runhidden waituntilterminated; StatusMsg: "Установка службы Windows..."; Components: service
-Filename: "sc"; Parameters: "description ""Basip Key Service"" ""Service for working with Bas-IP devices. Version 2.0.4.0"""; Flags: runhidden waituntilterminated; Components: service
+Filename: "sc"; Parameters: "description ""Basip Key Service"" ""Service for working with Bas-IP devices. Version 2.0.5.0"""; Flags: runhidden waituntilterminated; Components: service
 Filename: "sc"; Parameters: "start ""Basip Key Service"""; Flags: runhidden waituntilterminated; StatusMsg: "Запуск службы..."; Components: service
 
 ; Создание папки для логов
@@ -107,10 +109,11 @@ begin
   if CurStep = ssPostInstall then
   begin
     MsgBox('Установка Basip Key Service завершена успешно!' + #13#10 + #13#10 + 
-           'Версия: 2.0.4.0' + #13#10 +
+           'Версия: 2.0.5.0' + #13#10 +
            'Исполняемый файл: basipkeysservices.exe' + #13#10 + #13#10 +
            'Служба "Basip Key Service" установлена и запущена.' + #13#10 +
            'Логи будут сохраняться в: {commonappdata}\Basip\ArtonitBasIpTools.log' + #13#10 +
+           'Журнал процессов (обработка событий): {commonappdata}\Basip\basipkeysservices.log' + #13#10 +
            'Конфигурация: {app}\appsettings.json' + #13#10 + #13#10 +
            'ВАЖНО: если параметр Service:db_config в appsettings.json пуст, ' +
            'служба не сможет подключиться к базе данных. Заполните строку подключения ' +
