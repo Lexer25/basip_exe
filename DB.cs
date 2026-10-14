@@ -207,7 +207,7 @@ public class DB
             );
         }
 
-        _logger?.LogInformation("Testing database connection...");
+        _logger?.LogInformation("210 Testing database connection...");
 
         try
         {
@@ -218,7 +218,7 @@ public class DB
             cmd.ExecuteScalar();
 
             con.Close();
-            _logger?.LogInformation("Database connection successful");
+            _logger?.LogInformation("221 Database connection successful");
         }
         catch (FbException fbEx)
         {
@@ -251,7 +251,7 @@ public class DB
             );
         }
 
-        _logger?.LogInformation("Connection string validation completed successfully");
+        _logger?.LogInformation("254 Connection string validation completed successfully");
         return connectionString;
     }
 
@@ -372,14 +372,14 @@ public class DB
         using var con = CreateConnection();
         try
         {
-            _logger?.LogInformation("Testing database connection...");
+            _logger?.LogInformation("375 Testing database connection...");
             con.Open();
 
             using var cmd = new FbCommand("SELECT 1 FROM RDB$DATABASE", con);
             cmd.ExecuteScalar();
 
             con.Close();
-            _logger?.LogInformation("Database connection test successful");
+            _logger?.LogInformation("382 Database connection test successful");
             return true;
         }
         catch (FbException fbEx)

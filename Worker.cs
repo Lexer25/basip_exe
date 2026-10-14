@@ -334,6 +334,7 @@ namespace Basip
                                     {
                                         //метка времени превышает текущее время
                                         logger.LogInformation("336 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem));
+                                        continue; // <-- пропускаем аномальное событие, продолжаем обработку списка
 
                                     }
                                     else
@@ -659,19 +660,9 @@ namespace Basip
 
             try
             {
-                string? cardNumber = null;
-                if (logEvent.info?.model != null)
-                {
-                    // Пробуем разные ключи, которые могут содержать номер карты
-                    if (logEvent.info.model.TryGetValue("card", out object? cardValue) && cardValue != null)
-                    {
-                        cardNumber = cardValue.ToString();
-                    }
-                    else if (logEvent.info.model.TryGetValue("number", out object? numberValue) && numberValue != null)
-                    {
-                        cardNumber = numberValue.ToString();
-                    }
-                }
+                // Номер идентификатора: у API 2.x — info.model.number, у API 1.x — info.number
+                // (разбор обоих вариантов в LogItem.IdentifierNumber).
+                string? cardNumber = logEvent.IdentifierNumber;
 
                 // ПРАВИЛЬНЫЕ КОДЫ СОБЫТИЙ
                 int eventCode = logEvent.name?.key switch
