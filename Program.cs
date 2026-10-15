@@ -120,13 +120,15 @@ try
         ApplicationInfo.ExecutablePath,
         programStartedAt);
 
+
+
     // Остановка пишется по ApplicationStopping: хост вызывает его до закрытия приёмников
     // журнала (после RunAsync писать в файл уже поздно — провайдеры закрыты). Подписка
     // оформляется до RunAsync, иначе мгновенная остановка осталась бы без записи.
     host.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.Register(() =>
     {
         TimeSpan uptime = DateTime.Now - programStartedAt;
-        programLogger.LogInformation(
+        programLogger.LogDebug(
             "Остановка программы (службы) basip. Время работы: {Uptime}; время остановки: {Stopped:yyyy-MM-dd HH:mm:ss}",
             $"{(int)uptime.TotalHours:00}:{uptime.Minutes:00}:{uptime.Seconds:00}",
             DateTime.Now);

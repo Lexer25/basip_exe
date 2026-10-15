@@ -6,7 +6,7 @@
 
 basip keys services - это Windows-сервис для интеграции СКУД системы с панелями управления Bas-IP.
 
-Текущая версия приложения: 2.0.5.0 (задаётся в Basip.csproj; при каждом запуске она пишется
+Текущая версия приложения: 2.0.5.1 (задаётся в Basip.csproj; при каждом запуске она пишется
 в журнал строкой "Версия программы: ..." вместе с путём к исполняемому файлу).
 Версия установщика совпадает с версией приложения.
 
@@ -62,7 +62,7 @@ basip keys services - это Windows-сервис для интеграции С
 
 3. Сборка и установка (рекомендуемый способ):
    Запустите build.bat - он восстановит пакеты, опубликует приложение
-   в publish\win-x64 и соберёт установщик Output\BasipKeyServiceSetup_v2.0.5.0.exe.
+   в publish\win-x64 и соберёт установщик Output\BasipKeyServiceSetup_v2.0.5.1.exe.
    Установщик сам регистрирует службу с именем "Basip Key Service".
 
    Результат сборки - один файл publish\win-x64\basipkeysservices.exe размером ~5 МБ.
@@ -137,8 +137,9 @@ basip keys services - это Windows-сервис для интеграции С
 - LogLevel - уровень журнала для категорий приложения (Basip.*): Worker, DB, Device,
   Basip.DebugOutput, StartupFailureService. По умолчанию Information.
   Именно этот параметр включает подробную отладку (Trace и Debug) в файле и в консоли
-- ProcessLogLevel - уровень журнала процессов (категория Basip.Processing): подробности сбора
-  и разбора событий, дампы LogItem. Эти записи ведутся отдельным файлом
+- ProcessLogLevel - уровень журнала процессов (категория Basip.Processing): запуск и итерации
+  Worker, состояние панелей, операции с картами, запись событий (строки 32, 33, 71, 84, 126, 192,
+  503, 528, 535, 537, 540, 547, 703, 711). Эти записи ведутся отдельным файлом
   basipkeysservices_ГГГГ_ММ_ДД.log, поэтому отладку процессов можно держать включённой,
   не смешивая её с ошибками. По умолчанию равно Log:LogLevel
 - retainedFileCountLimit - количество хранимых файлов логов
@@ -196,15 +197,19 @@ WRN (Warning), ERR (Error), FTL (Critical) - так уровень называ�
 
 Типовые сообщения в логах (примеры для id_dev=617):
 
+Информационные сообщения приложения пишутся уровнем Debug, поэтому в основном журнале они видны
+при Log:LogLevel = Debug или Trace; уровня Information в наших категориях нет - так помечаются
+только служебные сообщения хоста (Microsoft.Extensions.Hosting) и прямая запись с версией программы.
+
 Старт/остановка программы (службы) - записи о самой службе идут в журнал процессов
 (basipkeysservices_ГГГГ_ММ_ДД.log), а не в основной:
-[INF][sys] Версия программы: 2.0.5.0. Исполняемый файл: C:\ArtonitSevices\basipkeysservices\basipkeysservices.exe
-[INF][sys] Старт программы (службы) basip. Версия: 2.0.5.0; режим: служба Windows; файл: C:\ArtonitSevices\basipkeysservices\basipkeysservices.exe; время старта: 2026-10-13 09:09:59
-[INF][sys] 32 старт Worker: 09:10:00 deltasleep: 00:00:00, первый запуск: 2026-10-13 09:10:00
-[INF][sys] 33 Служба записи и удаления карт и сбора события запущена.
-[INF][sys] 126 timeout basip: 00:10:00, следующий запуск: 2026-10-13 17:35:00
+[INF][sys] Версия программы: 2.0.5.1. Исполняемый файл: C:\ArtonitSevices\basipkeysservices\basipkeysservices.exe
+[DBG][sys] Старт программы (службы) basip. Версия: 2.0.5.1; режим: служба Windows; файл: C:\ArtonitSevices\basipkeysservices\basipkeysservices.exe; время старта: 2026-10-13 09:09:59
+[DBG][sys] 32 старт Worker: 09:10:00 deltasleep: 00:00:00, первый запуск: 2026-10-13 09:10:00
+[DBG][sys] 33 Служба записи и удаления карт и сбора события запущена.
+[DBG][sys] 126 timeout basip: 00:10:00, следующий запуск: 2026-10-13 17:35:00
 [FTL][sys] 49 остановка Worker
-[INF][sys] Остановка программы (службы) basip. Время работы: 08:25:02; время остановки: 2026-10-13 17:35:01
+[DBG][sys] Остановка программы (службы) basip. Время работы: 08:25:02; время остановки: 2026-10-13 17:35:01
 
 Записи "Старт/Остановка программы (службы)" делает сама программа: старт - до запуска Worker
 (поэтому запись есть и тогда, когда служба не стартовала из-за настроек), остановка - по событию
@@ -212,14 +217,13 @@ ApplicationStopping, пока приёмники журнала ещё откр�
 "49 остановка Worker" относятся только к Worker и не означают старт/остановку службы.
 
 Работа с устройствами:
-[INF][sys] 71 Зарегистрировано панелей bas-ip: 5 шт.
-[INF][sys] 164 Processing 3 devices with valid IP addresses
-[INF][617] 240 id_dev=617 Device http://192.168.68.2:80 apiVersion: 1.3.5, major: 1, middle: 3
+[DBG][sys] 71 Зарегистрировано панелей bas-ip: 5 шт.
+[DBG][sys] 164 Processing 3 devices with valid IP addresses
+[DBG][617] 240 id_dev=617 Device http://192.168.68.2:80 apiVersion: 1.3.5, major: 1, middle: 3
 [DBG][617] 288 id_dev=617 major api для обработки событий = 1
 
-Сбор событий и запросы к панели (эти строки пишутся в журнал процессов
-basipkeysservices_ГГГГ_ММ_ДД.log; уровень задаётся параметром Log:ProcessLogLevel, для Trace -
-Log:ProcessLogLevel = Trace):
+Сбор событий и запросы к панели (эти строки идут в основной журнал, уровень Trace и Debug,
+то есть Log:LogLevel = Trace или Debug):
 [VRB][617] 264 id_dev=617 Старт сбор событий IP: http://192.168.68.2:80 начиная с метки времени 2026-10-13 12:29:57
 [VRB][617] 443 === REQUEST DETAILS === ... QueryString: filter = timestamp+ge+1790802000000 ...
 [VRB][617] 455 GetLog result: status=OK, body={"list_option":...,"list_items":[...]}
@@ -227,35 +231,35 @@ Log:ProcessLogLevel = Trace):
 [DBG][617] 304 id_dev=617 Обработано 3 событий, последняя метка времени to: 2026-10-13 17:20:11
 
 Операции с картами:
-[INF][617] 369 Command destination: writekey id_dev=617 BASE_URL http://192.168.68.2:80 key="0001234567" AddCard
-[INF][617] 412 Answer destination: writekey id_dev=617 BASE_URL http://192.168.68.2:80 Answer: OK key="0001234567" uid=1673
-[INF][617] 471 CARD ALREADY EXISTS - Device: http://192.168.68.2:80, id_dev=617, Card Number: 0001234567, Existing UID: 1673
+[DBG][617] 369 Command destination: writekey id_dev=617 BASE_URL http://192.168.68.2:80 key="0001234567" AddCard
+[DBG][617] 412 Answer destination: writekey id_dev=617 BASE_URL http://192.168.68.2:80 Answer: OK key="0001234567" uid=1673
+[DBG][617] 471 CARD ALREADY EXISTS - Device: http://192.168.68.2:80, id_dev=617, Card Number: 0001234567, Existing UID: 1673
 
 Ошибки и предупреждения:
 [DBG][617] 149-0 Skipping device ID 617 - no IP address
-[INF][617] 192 id_dev=617 IP http://192.168.68.2:80 - нет связи.
+[DBG][617] 192 id_dev=617 IP http://192.168.68.2:80 - нет связи.
 [WRN][617] 336 id_dev=617 Failed to get events. Status: Unauthorized
 [FTL][sys] Служба не запущена: конфигурация приложения заполнена не полностью. Файл конфигурации: ...
 
 Мониторинг работы:
 
 1. Проверка подключения к БД:
-   - Успешное подключение: [INF][sys] 97 Ok connect database
+   - Успешное подключение: [DBG][sys] 97 Ok connect database
    - Ошибка: [ERR][sys] 104 No connect database: [connection_string]
 
 2. Статус устройств:
-   - Панель отвечает: [INF][617] 202 id_dev=617 Device ... STRVALUE for 'about': aa07bd,1.6.0 20251216,3.13.4,1.3.5, Auth OK
-   - Нет связи: [INF][617] 192 id_dev=617 IP http://... - нет связи.
-   - Нет авторизации: [INF][617] 211 id_dev=617 Device http://... auth failed
+   - Панель отвечает: [DBG][617] 202 id_dev=617 Device ... STRVALUE for 'about': aa07bd,1.6.0 20251216,3.13.4,1.3.5, Auth OK
+   - Нет связи: [DBG][617] 192 id_dev=617 IP http://... - нет связи.
+   - Нет авторизации: [DBG][617] 211 id_dev=617 Device http://... auth failed
 
 3. Обработка событий:
    - Новые события: [VRB][617] 276 id_dev=617 Получено N событий от device base_url= http://...
-   - Нет событий: [INF][617] 326 id_dev=617 Нет новых события для IP: http://..., device 617, major api = 1
+   - Нет событий: [DBG][617] 326 id_dev=617 Нет новых события для IP: http://..., device 617, major api = 1
    - Что вернула панель: [VRB][617] 455 GetLog result: status=OK, body=...
 
 4. Очистка логов:
-   - Успешно: [INF][617] 312 Successful attempt to clear the event log IP: http://..., device 617,id_dev=617,  major api = 1
-   - Ошибка: [WRN][617] 321 id_dev=617 The event log has not been cleared IP: http://..., device 617, major api = 1
+   - Успешно: [DBG][617] 312 Successful attempt to clear the event log IP: http://..., device 617,id_dev=617,  major api = 1
+   - Ошибка: [DBG][617] 321 id_dev=617 The event log has not been cleared IP: http://..., device 617, major api = 1
 
 Файлы логов:
 - Расположение: C:\ProgramData\Basip\ (или указанный в настройках путь; если каталог
@@ -263,7 +267,8 @@ Log:ProcessLogLevel = Trace):
 - Имя файла: ArtonitBasIpTools-ГГГГММДД.log (дату в имя добавляет файловый провайдер,
   поэтому файл заводится на каждые сутки)
 - Журнал процессов: basipkeysservices_ГГГГ_ММ_ДД.log в том же каталоге. В нём только записи
-  категории Basip.Processing (сбор и разбор событий, дампы LogItem); уровень - Log:ProcessLogLevel.
+  категории Basip.Processing (запуск и итерации Worker, состояние панелей, операции с картами,
+  запись событий); уровень - Log:ProcessLogLevel.
   Файл ведёт сам сервис (свой приёмник вместо Serilog), поэтому имя с датой через подчёркивания,
   а каждая строка сбрасывается на диск сразу - при аварийной остановке службы записи не теряются.
   Ярлык "Просмотр журнала процессов" в меню Пуск указывает на этот файл

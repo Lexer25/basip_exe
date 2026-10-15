@@ -207,7 +207,7 @@ public class DB
             );
         }
 
-        _logger?.LogInformation("Testing database connection...");
+        _logger?.LogDebug("Testing database connection...");
 
         try
         {
@@ -218,7 +218,7 @@ public class DB
             cmd.ExecuteScalar();
 
             con.Close();
-            _logger?.LogInformation("Database connection successful");
+            _logger?.LogDebug("Database connection successful");
         }
         catch (FbException fbEx)
         {
@@ -251,7 +251,7 @@ public class DB
             );
         }
 
-        _logger?.LogInformation("Connection string validation completed successfully");
+        _logger?.LogDebug("Connection string validation completed successfully");
         return connectionString;
     }
 
@@ -372,14 +372,14 @@ public class DB
         using var con = CreateConnection();
         try
         {
-            _logger?.LogInformation("Testing database connection...");
+            _logger?.LogDebug("Testing database connection...");
             con.Open();
 
             using var cmd = new FbCommand("SELECT 1 FROM RDB$DATABASE", con);
             cmd.ExecuteScalar();
 
             con.Close();
-            _logger?.LogInformation("Database connection test successful");
+            _logger?.LogDebug("Database connection test successful");
             return true;
         }
         catch (FbException fbEx)
@@ -479,17 +479,17 @@ public class DB
 
     public bool CheckRequiredTables(ILogger logger)
     {
-        logger.LogInformation($"Попытка подключения к БД. Строка подключения: {MaskConnectionString(_connectionString)}");
+        logger.LogDebug($"Попытка подключения к БД. Строка подключения: {MaskConnectionString(_connectionString)}");
 
         using var con = CreateConnection();
         try
         {
             con.Open();
-            logger.LogInformation("Подключение к базе данных успешно установлено.");
+            logger.LogDebug("Подключение к базе данных успешно установлено.");
 
             string[] requiredTables = { "DEVICE", "BAS_PARAM", "CARDINDEV", "CARD", "CARDIDX" };
 
-            logger.LogInformation($"Начинаю проверку обязательных таблиц: {string.Join(", ", requiredTables)}");
+            logger.LogDebug($"Начинаю проверку обязательных таблиц: {string.Join(", ", requiredTables)}");
 
             var missingTables = new List<string>();
 
@@ -509,7 +509,7 @@ public class DB
                 return false;
             }
 
-            logger.LogInformation("Проверка обязательных таблиц завершена успешно. Все таблицы найдены.");
+            logger.LogDebug("Проверка обязательных таблиц завершена успешно. Все таблицы найдены.");
             return true;
         }
         catch (Exception ex)

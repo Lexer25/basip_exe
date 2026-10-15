@@ -182,7 +182,7 @@ namespace Basip
                         logger.LogWarning($"149-0 Skipping device ID {rowDeviceId} - no IP address");
                         continue;
                     }
-                    logger.LogDebug($"149-1  device ID {rowDeviceId} IP {rowDeviceId} is OK");
+                    logger.LogInformation($"149-1  device ID {rowDeviceId} IP {rowDeviceId} is OK");
                     validDevicesCount++;
                     logger.LogDebug($"149-2 start TaskGet ID {rowDeviceId}");
                     tasks.Add(TaskGet(row, db));
@@ -194,7 +194,7 @@ namespace Basip
                 }
             }
 
-            logger.LogInformation($"164 Processing {validDevicesCount} devices with valid IP addresses");
+            logger.LogDebug($"164 Processing {validDevicesCount} devices with valid IP addresses");
 
             if (tasks.Count > 0)
             {
@@ -222,7 +222,7 @@ namespace Basip
             JsonDocument? deviceInfo = await dev.GetInfo();
             if (deviceInfo == null)
             {
-                processingLogger.LogInformation($"192 id_dev={dev.id_dev} IP {dev.base_url} - нет связи. ");
+                processingLogger.LogDebug($"192 id_dev={dev.id_dev} IP {dev.base_url} - нет связи. ");
                 dbForEvents.FixDeviceErr("Device not connected", currentDeviceId);
                 dbForEvents.SetOnlineState(currentDeviceId, 0);
                 return;
@@ -234,7 +234,7 @@ namespace Basip
             if (!isAuthenticated)
             {
                 auth = "Auth ERR";
-                logger.LogCritical($"211 id_dev={dev.id_dev} Device {dev.base_url} auth failed");
+                logger.LogWarning($"211 id_dev={dev.id_dev} Device {dev.base_url} auth failed");
                 dbForEvents.FixDeviceErr("Auth ERR", currentDeviceId);
                 return;
             }
@@ -248,7 +248,7 @@ namespace Basip
 
             // Формирование STRVALUE для BAS_PARAM.ABOUT
             string strValue = BuildAboutString(deviceInfo, auth);
-            logger.LogInformation($"202 id_dev={dev.id_dev} Device d_dev={dev.id_dev} {currentDeviceId} ({dev.base_url})  STRVALUE for 'about': {strValue}");
+            logger.LogDebug($"202 id_dev={dev.id_dev} Device d_dev={dev.id_dev} {currentDeviceId} ({dev.base_url})  STRVALUE for 'about': {strValue}");
             // Записываем значение в базу данных
             dbForEvents.InsertAbout(currentDeviceId, strValue);
             dbForEvents.SetOnlineState(currentDeviceId, 1);
@@ -273,7 +273,7 @@ namespace Basip
                 }
             }
 
-            logger.LogInformation($"240 id_dev={dev.id_dev} Device {dev.base_url} apiVersion: {_apiVersion}, major: {major}, middle: {middle}");
+            logger.LogDebug($"240 id_dev={dev.id_dev} Device {dev.base_url} apiVersion: {_apiVersion}, major: {major}, middle: {middle}");
 
             // Мажорная версия API нужна Device, чтобы выбрать адрес журнала
             // ("log/items" для 2.x, "log/list" для 1.x).
@@ -342,6 +342,7 @@ namespace Basip
                                     {
                                         //метка времени превышает текущее время
                                         logger.LogInformation("336 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem));
+                                        processingLogger.LogInformation("336 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem));
                                         continue; // <-- пропускаем аномальное событие, продолжаем обработку списка
 
                                     }
@@ -357,7 +358,7 @@ namespace Basip
                             }
                             else
                             {
-                                logger.LogDebug($"297 id_dev={dev.id_dev} Skipping old event with timestamp: {logItem.timestamp} {DateTimeOffset.FromUnixTimeMilliseconds(logItem.timestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss} (last: {lastTimestamp} {DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss})");
+                                logger.LogInformation($"297 id_dev={dev.id_dev} Skipping old event with timestamp: {logItem.timestamp} {DateTimeOffset.FromUnixTimeMilliseconds(logItem.timestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss} (last: {lastTimestamp} {DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss})");
                             }
                         }
                         logger.LogTrace($"300 id_dev={dev.id_dev} currentDeviceId = {currentDeviceId} maxTimestamp= {maxTimestamp} {DateTimeOffset.FromUnixTimeMilliseconds(maxTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss}");
@@ -372,7 +373,7 @@ namespace Basip
                                 switch (statusLog.StatusCode)
                                 {
                                     case HttpStatusCode.OK:
-                                        logger.LogInformation($"312 Successful attempt to clear the event log IP: {dev.base_url}, device {currentDeviceId},id_dev={dev.id_dev},  major api = {majorVersion}");
+                                        logger.LogDebug($"312 Successful attempt to clear the event log IP: {dev.base_url}, device {currentDeviceId},id_dev={dev.id_dev},  major api = {majorVersion}");
                                         break;
                                     default:
                                         logger.LogWarning($"315 Failed attempt to clear the event log IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}");
@@ -381,12 +382,12 @@ namespace Basip
                             }
                             else
                             {
-                                logger.LogWarning($"321 id_dev={dev.id_dev} The event log has not been cleared IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}");
+                                logger.LogDebug($"321 id_dev={dev.id_dev} The event log has not been cleared IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}");
                             }
                         }
                         else
                         {
-                            logger.LogInformation($"326 id_dev={dev.id_dev} Нет новых события для IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}");
+                            logger.LogDebug($"326 id_dev={dev.id_dev} Нет новых события для IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}");
                         }
                     }
                     else
@@ -435,7 +436,8 @@ namespace Basip
         private async Task ProcessCardWrite(DB db, Device dev, DataRow card, int deviceId)
         {
             string cardId = GetCardId(card);
-            logger.LogInformation($@"369 Command destination: writekey id_dev={deviceId} BASE_URL {dev.base_url} key=""{options.uidtransform(cardId)}"" AddCard ");
+            logger.LogDebug($@"369 Command destination: writekey id_dev={deviceId} BASE_URL {dev.base_url} key=""{options.uidtransform(cardId)}"" AddCard ");
+            processingLogger.LogDebug($@"369 Command destination: writekey id_dev={deviceId} BASE_URL {dev.base_url} key=""{options.uidtransform(cardId)}"" AddCard ");
 
             RestResponse request = await dev.AddIdentifier(options.uidtransform(cardId), "card");
             bool shouldDeleteFromQueue = false;
@@ -454,7 +456,8 @@ namespace Basip
                     break;
 
                 default:
-                    logger.LogInformation($@"394 Answer destination: writekey id_dev={targetDeviceId} BASE_URL {dev.base_url} Answer: {request.StatusCode} key=""{options.uidtransform(cardId)}""");
+                    logger.LogDebug($@"394 Answer destination: writekey id_dev={targetDeviceId} BASE_URL {dev.base_url} Answer: {request.StatusCode} key=""{options.uidtransform(cardId)}""");
+                    processingLogger.LogDebug($@"394 Answer destination: writekey id_dev={targetDeviceId} BASE_URL {dev.base_url} Answer: {request.StatusCode} key=""{options.uidtransform(cardId)}""");
                     db.UpdateCardInDevIncrement((int)card["id_cardindev"]);
                     break;
             }
@@ -472,7 +475,8 @@ namespace Basip
             try
             {
                 var uid = JsonDocument.Parse(request.Content!).RootElement.GetProperty("uid").ToString();
-                logger.LogInformation($@"412 Answer destination: writekey id_dev={deviceId} BASE_URL {dev.base_url} Answer: OK key=""{options.uidtransform(cardId)}"" uid={uid}");
+                logger.LogDebug($@"412 Answer destination: writekey id_dev={deviceId} BASE_URL {dev.base_url} Answer: OK key=""{options.uidtransform(cardId)}"" uid={uid}");
+                processingLogger.LogDebug($@"412 Answer destination: writekey id_dev={deviceId} BASE_URL {dev.base_url} Answer: OK key=""{options.uidtransform(cardId)}"" uid={uid}");
 
                 int uidInt = 0;
                 if (!int.TryParse(uid, out uidInt))
@@ -485,7 +489,7 @@ namespace Basip
 
                 if (rowsUpdated > 0)
                 {
-                    logger.LogInformation($"425 Successfully updated {rowsUpdated} rows in CARDIDX");
+                    logger.LogDebug($"425 Successfully updated {rowsUpdated} rows in CARDIDX");
                 }
                 else
                 {
@@ -507,13 +511,14 @@ namespace Basip
         private async Task ProcessCardAlreadyExists(DB db, Device dev, DataRow card, string cardId, int deviceId)
         {
             logger.LogInformation($@"446 Answer destination: writekey id_dev={deviceId} BASE_URL {dev.base_url} Answer: BAD REQUEST key=""{options.uidtransform(cardId)}"" card already exists");
+            processingLogger.LogInformation($@"446 Answer destination: writekey id_dev={deviceId} BASE_URL {dev.base_url} Answer: BAD REQUEST key=""{options.uidtransform(cardId)}"" card already exists");
 
             try
             {
                 var cardInfoResponse = await dev.GetInfoCard(options.uidtransform(cardId), 2);
                 int existingUid = 0;
 
-                logger.LogInformation($"453 GetInfoCard response status: {cardInfoResponse.StatusCode}");
+                logger.LogDebug($"453 GetInfoCard response status: {cardInfoResponse.StatusCode}");
 
                 if (cardInfoResponse.StatusCode == HttpStatusCode.OK && !string.IsNullOrEmpty(cardInfoResponse.Content))
                 {
@@ -532,6 +537,7 @@ namespace Basip
                                 if (int.TryParse(uidStr, out existingUid))
                                 {
                                     logger.LogInformation($"471 CARD ALREADY EXISTS - Device: {dev.base_url}, id_dev={deviceId}, Card Number: {cardId}, Existing UID: {existingUid}");
+                                    processingLogger.LogInformation($"471 CARD ALREADY EXISTS - Device: {dev.base_url}, id_dev={deviceId}, Card Number: {cardId}, Existing UID: {existingUid}");
                                 }
                             }
                         }
@@ -560,7 +566,7 @@ namespace Basip
             string cardId = GetCardId(card);
             string delcommandlog = $@"deletekey id_dev ={deviceId} BASE_URL {dev.base_url} key = ""{options.uidtransform(cardId)}""";
 
-            processingLogger.LogInformation("503 "+delcommandlog + "GetInfoCard " + "major api=\"" + majorVersion + "\"");
+            processingLogger.LogDebug("503 "+delcommandlog + "GetInfoCard " + "major api=\"" + majorVersion + "\"");
 
             RestResponse? content = await dev.GetInfoCard(options.uidtransform(cardId), majorVersion);
 
@@ -594,7 +600,7 @@ namespace Basip
 
                         if (uidToDelete != null)
                         {
-                            processingLogger.LogInformation($"528 {delcommandlog}" + $@" для карты {cardId} uid ={uidToDelete} DeleteCard major api = {majorVersion}");
+                            processingLogger.LogDebug($"528 {delcommandlog}" + $@" для карты {cardId} uid ={uidToDelete} DeleteCard major api = {majorVersion}");
 
                             var status = (await dev.DeleteCard(uidToDelete)).StatusCode;
 
@@ -603,7 +609,7 @@ namespace Basip
                                 case HttpStatusCode.OK:
                                     processingLogger.LogDebug($@"535 {delcommandlog}   Answer: OK uid={uidToDelete}");
                                     db.DeleteCardInDev((int)card["id_cardindev"]);
-                                    processingLogger.LogInformation($"537 Card {cardId} successfully processed and removed from queue for device {deviceId}");
+                                    processingLogger.LogDebug($"537 Card {cardId} successfully processed and removed from queue for device {deviceId}");
                                     break;
                                 default:
                                     processingLogger.LogDebug($@"540 Answer destination: {delcommandlog} Answer: ERR uid={uidToDelete} no delete");
@@ -615,7 +621,7 @@ namespace Basip
                         {
                             processingLogger.LogDebug($@"547 {delcommandlog} Answer: OK no card in panel");
                             db.DeleteCardInDev((int)card["id_cardindev"]);
-                            logger.LogInformation($"Card {cardId} successfully processed and removed from queue for device {deviceId}");
+                            logger.LogDebug($"Card {cardId} successfully processed and removed from queue for device {deviceId}");
                         }
                     }
                     break;
@@ -729,11 +735,11 @@ namespace Basip
                     {
                         if (cardNumber != null)
                         {
-                            processingLogger.LogInformation($"703 +{note}, EventType={eventCode}, Card={cardNumber},  Id_Event={insertedId},  major api = {majorVersion}, id_dev={dev.id_dev}");
+                            processingLogger.LogDebug($"703 +{note}, EventType={eventCode}, Card={cardNumber},  Id_Event={insertedId},  major api = {majorVersion}, id_dev={dev.id_dev}");
                         }
                         else
                         {
-                            processingLogger.LogInformation($"711 +{note}, EventType={eventCode}, Id_Event={insertedId},  major api = {majorVersion}");
+                            processingLogger.LogDebug($"711 +{note}, EventType={eventCode}, Id_Event={insertedId},  major api = {majorVersion}");
                         }
                     }
                   */
@@ -742,30 +748,34 @@ namespace Basip
                     {
                         if (cardNumber != null)
                         {
-                            processingLogger.LogInformation($"703 +{note},  Card={cardNumber}, major api = {majorVersion}, id_dev={dev.id_dev};  Id_Event_insert={insertedId}");
+                            processingLogger.LogDebug($"703 +{note},  Card={cardNumber}, major api = {majorVersion}, id_dev={dev.id_dev};  Id_Event_insert={insertedId}");
+                            logger.LogDebug($"703 +{note},  Card={cardNumber}, major api = {majorVersion}, id_dev={dev.id_dev};  Id_Event_insert={insertedId}");
                         }
                         else
                         {
-                            processingLogger.LogInformation($"711 +{note}, major api = {majorVersion};  Id_Event_insert={insertedId}");
+                            processingLogger.LogDebug($"711 +{note}, major api = {majorVersion};  Id_Event_insert={insertedId}");
+                            logger.LogDebug($"711 +{note}, major api = {majorVersion};  Id_Event_insert={insertedId}");
                         }
 
-                        //processingLogger.LogInformation($"718 Event saved: Dev={deviceId}, Type={eventCode}, EventType={eventCode}, Id_Event={insertedEventTypeId.Value}, RowDeviceDate={logEvent.timestamp}, major api = {majorVersion}");
+                        //processingLogger.LogDebug($"718 Event saved: Dev={deviceId}, Type={eventCode}, EventType={eventCode}, Id_Event={insertedEventTypeId.Value}, RowDeviceDate={logEvent.timestamp}, major api = {majorVersion}");
                     }
                     else
                     {
                         if (cardNumber != null)
                         {
-                            processingLogger.LogInformation($"703 +{note},  Card={cardNumber},  major api = {majorVersion}, id_dev={dev.id_dev};  Id_Event_insert=Failed to save");
+                            processingLogger.LogDebug($"703 +{note},  Card={cardNumber},  major api = {majorVersion}, id_dev={dev.id_dev};  Id_Event_insert=Failed to save");
+                            logger.LogDebug($"703 +{note},  Card={cardNumber},  major api = {majorVersion}, id_dev={dev.id_dev};  Id_Event_insert=Failed to save");
                         }
                         else
                         {
-                            processingLogger.LogInformation($"711 +{note},  major api = {majorVersion}; Id_Event_insert=Failed to save");
+                            processingLogger.LogDebug($"711 +{note},  major api = {majorVersion}; Id_Event_insert=Failed to save");
+                            logger.LogDebug($"711 +{note},  major api = {majorVersion}; Id_Event_insert=Failed to save");
                         }
                         //processingLogger.LogError($"722 Failed to save event: Dev={deviceId}, EventType={eventCode}, major api = {majorVersion} ");
                     }
                 } else
                 {
-                    //processingLogger.LogInformation($"741 -{note}, Card={cardNumber}, EventType={eventCode}, Id_Event=,  major api = {majorVersion}, id_dev={dev.id_dev}");
+                    //processingLogger.LogDebug($"741 -{note}, Card={cardNumber}, EventType={eventCode}, Id_Event=,  major api = {majorVersion}, id_dev={dev.id_dev}");
                 }
             }
 
