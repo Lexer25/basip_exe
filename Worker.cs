@@ -341,8 +341,8 @@ namespace Basip
                                     if (logItem.timestamp > currentTimestamp)
                                     {
                                         //метка времени превышает текущее время
-                                        logger.LogInformation("336 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem));
-                                        processingLogger.LogInformation("336 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem));
+                                        logger.LogInformation("336 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem, LogJson.Options));
+                                        processingLogger.LogInformation("336 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem, LogJson.Options));
                                         continue; // <-- пропускаем аномальное событие, продолжаем обработку списка
 
                                     }
@@ -352,7 +352,7 @@ namespace Basip
                                     }
                                 }
                                 // Для отладки можно вывести полный JSON
-                                logger.LogDebug("293 id_dev={IdDev} IP: {BaseUrl} текст события LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem));
+                                logger.LogDebug("293 id_dev={IdDev} IP: {BaseUrl} текст события LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem, LogJson.Options));
                                 await ProcessLogEvent(dbForEvents, dev, logItem, currentDeviceId, majorVersion);//записываю событий в базу данных СКУД
                                 processedEventsCount++;//счетчик: сколько событий записано
                             }

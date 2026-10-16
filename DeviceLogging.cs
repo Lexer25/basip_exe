@@ -1,5 +1,8 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using System.Text.Encodings.Web;
+using System.Text.Json;
+using System.Text.Unicode;
 
 namespace Basip
 {
@@ -197,5 +200,24 @@ namespace Basip
         }
 
         public void Dispose() => inner.Dispose();
+    }
+
+    /// <summary>
+    /// Настройки сериализации объектов, которые пишутся в журнал (события панели и т. п.).
+    /// Штатный JavaScriptEncoder.Default экранирует всё вне ASCII, поэтому кириллица в дампах
+    /// выглядела как "\u0421\u043E\u0432...". Здесь кириллица и другие не-ASCII символы пишутся
+    /// как есть, а потенциально опасные для разметки символы (&lt;, &gt;, &amp;, ', ") остаются
+    /// экранированными: текст в журнал приходит от внешнего устройства (панели).
+    /// </summary>
+    public static class LogJson
+    {
+        /// <summary>
+        /// Экземпляр один на приложение: JsonSerializerOptions кэширует внутри метаданные типов,
+        /// и создавать его на каждую запись журнала нельзя.
+        /// </summary>
+        public static readonly JsonSerializerOptions Options = new JsonSerializerOptions
+        {
+            Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+        };
     }
 }

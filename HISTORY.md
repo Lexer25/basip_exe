@@ -1,5 +1,21 @@
 basip_ctrl_panel - History
 
+Версия: 2.0.5.2
+1. Дампы LogItem в журнале пишутся с читаемой кириллицей: JsonSerializer.Serialize вызывается
+   с общими настройками LogJson.Options (JavaScriptEncoder.Create(UnicodeRanges.All)) вместо
+   JavaScriptEncoder по умолчанию, который превращал русский текст в "\u0421\u043E\u0432...".
+   Полнота дампа сохранена (включая неизвестные поля панели из [JsonExtensionData]), а опасные
+   для разметки символы (<, >, &, ') остаются экранированными, так как текст приходит от панели.
+   Изменение затрагивает дампы в Worker.cs: строка 293 (основной журнал) и строка 336 (пишется
+   в оба журнала).
+2. В appsettings.json значения Log:LogLevel снабжены подсказками по каждому уровню (что
+   пропускается при Trace, Debug, Information, Warning, Error, Critical, None), а сам уровень
+   выставлен в Information: подробная отладка включается осознанно. Журнала процессов это
+   не касается - у него свой уровень Log:ProcessLogLevel (Trace). Следствие: дамп строки 293
+   (уровень Debug, основной журнал) при Log:LogLevel = Information в журнал не попадает,
+   строка 336 (Information) видна.
+3. Версия приложения поднята до 2.0.5.2 (Basip.csproj).
+
 Версия: 2.0.5.1
 1. Изменения связаны с уровнями логирования: все информационные записи приложения переведены
    с Information на Debug (.LogInformation заменён на .LogDebug в Worker.cs, DB.cs и Program.cs).
