@@ -113,7 +113,9 @@ try
 
     // Запись о старте делается до RunAsync: она первая в журнале и не зависит от того,
     // что успел сделать Worker. Режим важен при разборе: служба Windows или запуск в консоли.
-    programLogger.LogInformation(
+    // Уровень Critical выбран осознанно (как и для остановки): старт и остановка службы должны
+    // быть видны при любом уровне журнала, а не только при Trace/Debug.
+    programLogger.LogCritical(
         "Старт программы (службы) basip. Версия: {Version}; режим: {Mode}; файл: {Executable}; время старта: {Started:yyyy-MM-dd HH:mm:ss}",
         ApplicationInfo.Version,
         WindowsServiceHelpers.IsWindowsService() ? "служба Windows" : "консоль",
@@ -128,7 +130,7 @@ try
     host.Services.GetRequiredService<IHostApplicationLifetime>().ApplicationStopping.Register(() =>
     {
         TimeSpan uptime = DateTime.Now - programStartedAt;
-        programLogger.LogDebug(
+        programLogger.LogCritical(
             "Остановка программы (службы) basip. Время работы: {Uptime}; время остановки: {Stopped:yyyy-MM-dd HH:mm:ss}",
             $"{(int)uptime.TotalHours:00}:{uptime.Minutes:00}:{uptime.Seconds:00}",
             DateTime.Now);

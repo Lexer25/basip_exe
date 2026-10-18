@@ -8,11 +8,11 @@
     <UserSecretsId>dotnet-Basip-cb8c693b-e5ee-4fcf-9faa-8403bced6feb</UserSecretsId>
     <Version>2.0.5.5</Version>
     <AssemblyVersion>2.0.5.5</AssemblyVersion>
-    <FileVersion>2.0.5.4</FileVersion>
-    <InformationalVersion>2.0.5.1</InformationalVersion>
-    <ProductVersion>2.0.5.1</ProductVersion>
-    <!-- Без этого SDK дописывает к версии хэш коммита (2.0.5.1+<sha>),
-         а версия должна отображаться ровно как 2.0.5.1. -->
+    <FileVersion>2.0.5.5</FileVersion>
+    <InformationalVersion>2.0.5.5</InformationalVersion>
+    <ProductVersion>2.0.5.5</ProductVersion>
+    <!-- Без этого SDK дописывает к версии хэш коммита (2.0.5.5+<sha>),
+         а версия должна отображаться ровно как 2.0.5.5. -->
     <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <AssemblyName>basipkeysservices</AssemblyName>
   </PropertyGroup>

@@ -1,5 +1,33 @@
 basip_ctrl_panel - History
 
+Версия: 2.0.5.5
+1. Уровни логирования приведены к двум, по приложенной таблице уровней: подробности обработки -
+   Trace, проблемы и ошибки - Critical. Правки сделаны в Worker.cs (57 вызовов), DB.cs (8) и
+   Device.cs (2); две строки Device (340 - накопление событий, 362 - не получена страница)
+   оставлены на Warning, как в таблице. Строки, которые пишутся через processingLogger
+   (журнал процессов), не менялись - 27 вызовов остались как были.
+2. Строки, которых в таблице не было, размечены по той же логике: 319 (параметры события) -
+   Trace, 400 (Failed to get events) и 435 (ошибка при очистке журнала) - Critical. Строка
+   "Card ... successfully processed and removed from queue" (без номера) переведена с Debug
+   на Trace.
+3. Старт и остановка программы (службы) пишутся уровнем Critical: так они видны при любом
+   Log:ProcessLogLevel, а не только при Trace или Debug.
+4. Следствие для основного журнала: при текущих настройках (Log:LogLevel = Information) в нём
+   видны только Critical (плюс Warning у строк 340 и 362), а все Trace-подробности (SQL-запросы,
+   дампы событий, состояние панелей) - только при Log:LogLevel = Trace. Журнала процессов это
+   не касается: у него свой уровень Log:ProcessLogLevel = Trace.
+5. Исправлено предупреждение CA2017 в StartupConfiguration.cs (сообщение 311): в шаблоне был
+   один заполнитель {ConfigurationFile}, а аргументов передавалось два. Лишний аргумент убран;
+   текст предупреждения о каталоге журнала, как и раньше, пишется отдельной строкой из Program.cs.
+6. Версии приведены к 2.0.5.5: приложение (Basip.csproj - Version, AssemblyVersion, FileVersion,
+   InformationalVersion, ProductVersion), установщик (BasipSetup.iss), build.bat, README.
+7. Исправлен профиль публикации Properties\PublishProfiles\SingleFile.pubxml: в XML-комментарии
+   стояли два дефиса подряд (двухфазная запись параметра self-contained), из-за чего MSBuild
+   не загружал файл (MSB4024) и публикация с этим профилем падала; TargetFramework был net8.0
+   вместо net8.0-windows. Файл пересохранён в UTF-8 с исправленным комментарием.
+   Публикация проверена обоими профилями: FolderProfile пишет в publish\win-x64,
+   SingleFile - в bin\Release\net8.0-windows\win-x64\publish.
+
 Версия: 2.0.5.2
 1. Дампы LogItem в журнале пишутся с читаемой кириллицей: JsonSerializer.Serialize вызывается
    с общими настройками LogJson.Options (JavaScriptEncoder.Create(UnicodeRanges.All)) вместо

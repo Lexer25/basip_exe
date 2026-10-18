@@ -309,7 +309,7 @@ namespace Basip
             else
             {
                 logger.LogCritical("311 Исправьте настройки в файле {ConfigurationFile} и запустите службу снова.",
-                    logFile.Warning, StartupConfiguration.ConfigurationFilePath);
+                    StartupConfiguration.ConfigurationFilePath);
             }
 
             Environment.ExitCode = 1;

@@ -97,7 +97,7 @@ namespace Basip
                     // оставляем "unknown"
                 }
 
-                logger.LogTrace($"93 Error creating Device object for ID {deviceId}: {e.Message}");
+                logger.LogCritical($"93 Error creating Device object for ID {deviceId}: {e.Message}");
                 throw;
             }
 
@@ -323,7 +323,7 @@ namespace Basip
 
             if (!probeResponse.IsSuccessful)
             {
-                logger.LogTrace($"317 GetEvents: не удалось получить количество событий, status={probeResponse.StatusCode}, ответ возвращён без разбора страниц");
+                logger.LogCritical($"317 GetEvents: не удалось получить количество событий, status={probeResponse.StatusCode}, ответ возвращён без разбора страниц");
                 return probeResponse;
             }
 

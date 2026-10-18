@@ -128,7 +128,7 @@ public class DB
         sb.Append(": ");
         sb.Append(finalSql.Replace("\r", " ").Replace("\n", " ").Trim());
 
-        _logger.LogDebug("{SqlLog}", sb.ToString());
+        _logger.LogTrace("{SqlLog}", sb.ToString());
     }
 
     /// <summary>
@@ -137,7 +137,7 @@ public class DB
     private void LogSqlResult(string context, int rowsAffected, long elapsedMs)
     {
         if (_logger == null) return;
-        _logger.LogDebug("140 SQL [{Context}] completed: rows={Rows}, elapsed={Elapsed}ms",
+        _logger.LogTrace("140 SQL [{Context}] completed: rows={Rows}, elapsed={Elapsed}ms",
             context, rowsAffected, elapsedMs);
     }
 
@@ -200,13 +200,12 @@ public class DB
                 );
             }
 
-            _logger?.LogWarning(
-                "Connection string missing recommended parameters: {MissingParams}",
+            _logger?.LogCritical("203 Connection string missing recommended parameters: {MissingParams}",
                 string.Join(", ", missingParams)
             );
         }
 
-        _logger?.LogDebug("Testing database connection...");
+        //_logger?.LogDebug("Testing database connection...");
 
         try
         {
@@ -217,17 +216,17 @@ public class DB
             cmd.ExecuteScalar();
 
             con.Close();
-            _logger?.LogDebug("Database connection successful");
+            _logger?.LogCritical("219 Database connection successful");
         }
         catch (FbException fbEx)
         {
             string errorDetails = DecodeFirebirdError(fbEx, connectionString);
 
             _logger?.LogError("================================================================================");
-            _logger?.LogError("DATABASE CONNECTION FAILED!");
-            _logger?.LogError("{ErrorDetails}", errorDetails);
+            _logger?.LogError("226 DATABASE CONNECTION FAILED!");
+            _logger?.LogError("227 {ErrorDetails}", errorDetails);
             _logger?.LogError("================================================================================");
-            _logger?.LogError("Connection string: {ConnectionString}", MaskConnectionString(connectionString));
+            _logger?.LogCritical("229 Connection string: {ConnectionString}", MaskConnectionString(connectionString));
             _logger?.LogError("================================================================================");
 
             throw new InvalidOperationException(
@@ -238,19 +237,19 @@ public class DB
         catch (Exception ex)
         {
             _logger?.LogError("================================================================================");
-            _logger?.LogError("DATABASE CONNECTION FAILED!");
-            _logger?.LogError("Error: {Error}", ex.Message);
+            _logger?.LogError("240 DATABASE CONNECTION FAILED!");
+            _logger?.LogError("241 Error: {Error}", ex.Message);
             _logger?.LogError("================================================================================");
-            _logger?.LogError("Connection string: {ConnectionString}", MaskConnectionString(connectionString));
+            _logger?.LogError("243 Connection string: {ConnectionString}", MaskConnectionString(connectionString));
             _logger?.LogError("================================================================================");
 
             throw new InvalidOperationException(
-                $"Cannot connect to database: {ex.Message}",
+                $"247 Cannot connect to database: {ex.Message}",
                 ex
             );
         }
 
-        _logger?.LogDebug("Connection string validation completed successfully");
+        _logger?.LogDebug("252 Connection string validation completed successfully");
         return connectionString;
     }
 
@@ -371,26 +370,26 @@ public class DB
         using var con = CreateConnection();
         try
         {
-            _logger?.LogDebug("Testing database connection...");
+            _logger?.LogDebug("373 Testing database connection...");
             con.Open();
 
             using var cmd = new FbCommand("SELECT 1 FROM RDB$DATABASE", con);
             cmd.ExecuteScalar();
 
             con.Close();
-            _logger?.LogDebug("Database connection test successful");
+            _logger?.LogDebug("380 Database connection test successful");
             return true;
         }
         catch (FbException fbEx)
         {
             errorMessage = DecodeFirebirdError(fbEx, _connectionString);
-            _logger?.LogError(fbEx, "Database connection test failed");
+            _logger?.LogError(fbEx, "386 Database connection test failed");
             return false;
         }
         catch (Exception ex)
         {
             errorMessage = ex.Message;
-            _logger?.LogError(ex, "Database connection test failed");
+            _logger?.LogError(ex, "392 Database connection test failed");
             return false;
         }
     }
@@ -471,31 +470,31 @@ public class DB
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Ошибка при проверке таблицы {TableName}", tableName);
+            _logger?.LogError(ex, "473 Ошибка при проверке таблицы {TableName}", tableName);
             return false;
         }
     }
 
     public bool CheckRequiredTables(ILogger logger)
     {
-        logger.LogDebug($"Попытка подключения к БД. Строка подключения: {MaskConnectionString(_connectionString)}");
+        logger.LogTrace($"480 Попытка подключения к БД. Строка подключения: {MaskConnectionString(_connectionString)}");
 
         using var con = CreateConnection();
         try
         {
             con.Open();
-            logger.LogDebug("Подключение к базе данных успешно установлено.");
+            logger.LogTrace("486 Подключение к базе данных успешно установлено.");
 
             string[] requiredTables = { "DEVICE", "BAS_PARAM", "CARDINDEV", "CARD", "CARDIDX" };
 
-            logger.LogDebug($"Начинаю проверку обязательных таблиц: {string.Join(", ", requiredTables)}");
+            logger.LogTrace($"490 Начинаю проверку обязательных таблиц: {string.Join(", ", requiredTables)}");
 
             var missingTables = new List<string>();
 
             foreach (var table in requiredTables)
             {
                 bool exists = TableExists(table);
-                logger.LogDebug($"Таблица '{table}': {(exists ? "НАЙДЕНА" : "ОТСУТСТВУЕТ")}");
+                logger.LogCritical($"497 Таблица '{table}': {(exists ? "НАЙДЕНА" : "ОТСУТСТВУЕТ")}");
                 if (!exists)
                 {
                     missingTables.Add(table);
@@ -504,16 +503,16 @@ public class DB
 
             if (missingTables.Any())
             {
-                logger.LogCritical($"КРИТИЧЕСКАЯ ОШИБКА: В базе данных отсутствуют обязательные таблицы: {string.Join(", ", missingTables)}");
+                logger.LogCritical($"506 КРИТИЧЕСКАЯ ОШИБКА: В базе данных отсутствуют обязательные таблицы: {string.Join(", ", missingTables)}");
                 return false;
             }
 
-            logger.LogDebug("Проверка обязательных таблиц завершена успешно. Все таблицы найдены.");
+            logger.LogTrace("510 Проверка обязательных таблиц завершена успешно. Все таблицы найдены.");
             return true;
         }
         catch (Exception ex)
         {
-            logger.LogError($"ОШИБКА ПОДКЛЮЧЕНИЯ К БАЗЕ ДАННЫХ: {ex.Message}");
+            logger.LogCritical($"515 ОШИБКА ПОДКЛЮЧЕНИЯ К БАЗЕ ДАННЫХ: {ex.Message}");
             return false;
         }
     }
@@ -561,7 +560,7 @@ public class DB
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error setting about for id_dev={IdDev}", id_dev);
+            _logger?.LogError(ex, "563 Error setting about for id_dev={IdDev}", id_dev);
             return false;
         }
     }
@@ -602,7 +601,7 @@ public class DB
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error setting ONLINE state for id_dev={IdDev}", id_dev);
+            _logger?.LogError(ex, "604 Error setting ONLINE state for id_dev={IdDev}", id_dev);
             return false;
         }
     }
@@ -644,7 +643,7 @@ public class DB
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error setting last event ID for id_dev={IdDev}", id_dev);
+            _logger?.LogError(ex, "646 Error setting last event ID for id_dev={IdDev}", id_dev);
             return false;
         }
     }
@@ -678,7 +677,7 @@ public class DB
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error getting last event ID for id_dev={IdDev}", id_dev);
+            _logger?.LogError(ex, "680 Error getting last event ID for id_dev={IdDev}", id_dev);
             return 0;
         }
     }
@@ -707,8 +706,7 @@ public class DB
 
         if (note != null && note.Length > MAX_NOTE_LEN)
         {
-            _logger?.LogWarning(
-                "EventInsert: note truncated from {Original} to {Max} chars. id_cntrl={IdCntrl}, id_eventtype={IdEventType}",
+            _logger?.LogWarning("709 EventInsert: note truncated from {Original} to {Max} chars. id_cntrl={IdCntrl}, id_eventtype={IdEventType}",
                 note.Length, MAX_NOTE_LEN, id_cntrl ?? 0, id_eventtype ?? 0);
 
             note = note.Substring(0, MAX_NOTE_LEN);
@@ -779,25 +777,24 @@ public class DB
             {
                 int result = Convert.ToInt32(outputParam.Value);
 
-                _logger?.LogDebug(
-                    "784 Event inserted successfully. ID: {EventId}, Device: {DeviceId}, Type: {EventType}, timestam: {idserverts}",
+                _logger?.LogDebug("784 Event inserted successfully. ID: {EventId}, Device: {DeviceId}, Type: {EventType}, timestam: {idserverts}",
                     result, id_cntrl ?? 0, id_eventtype ?? 0, idserverts ?? 0);
 
                 return result;
             }
 
-            _logger?.LogWarning("Event inserted but no return value received");
+            _logger?.LogWarning("786 Event inserted but no return value received");
             return null;
         }
         catch (FbException fbEx)
         {
             _logger?.LogError(fbEx,
-                "Firebird error inserting event. Device: {DeviceId}, EventType: {EventType}, ErrorCode: {ErrorCode}",
+                "792 Firebird error inserting event. Device: {DeviceId}, EventType: {EventType}, ErrorCode: {ErrorCode}",
                 id_cntrl ?? 0, id_eventtype ?? 0, fbEx.ErrorCode);
 
             if (fbEx.Message.Contains("deadlock") || fbEx.Message.Contains("timeout"))
             {
-                _logger?.LogWarning("Deadlock or timeout detected, event may need retry");
+                _logger?.LogWarning("797 Deadlock or timeout detected, event may need retry");
             }
 
             return null;
@@ -805,14 +802,14 @@ public class DB
         catch (InvalidOperationException invEx)
         {
             _logger?.LogError(invEx,
-                "Invalid operation while inserting event. Device: {DeviceId}",
+                "805 Invalid operation while inserting event. Device: {DeviceId}",
                 id_cntrl ?? 0);
             return null;
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex,
-                "Unexpected error inserting event. Device: {DeviceId}, EventType: {EventType}",
+                "812 Unexpected error inserting event. Device: {DeviceId}, EventType: {EventType}",
                 id_cntrl ?? 0, id_eventtype ?? 0);
             return null;
         }
@@ -856,7 +853,7 @@ public class DB
         table.Load(reader);
         sw.Stop();
 
-        LogSqlResult("GetDevice", table.Rows.Count, sw.ElapsedMilliseconds);
+        LogSqlResult("856 GetDevice", table.Rows.Count, sw.ElapsedMilliseconds);
         return table;
     }
 
@@ -880,7 +877,7 @@ public class DB
         table.Load(reader);
         sw.Stop();
 
-        LogSqlResult("GetCardForLoad", table.Rows.Count, sw.ElapsedMilliseconds);
+        LogSqlResult("880 GetCardForLoad", table.Rows.Count, sw.ElapsedMilliseconds);
         return table;
     }
 
@@ -897,7 +894,7 @@ public class DB
         var sw = Stopwatch.StartNew();
         int rows = getcomand.ExecuteNonQuery();
         sw.Stop();
-        LogSqlResult("DeleteCardInDev", rows, sw.ElapsedMilliseconds);
+        LogSqlResult("897 DeleteCardInDev", rows, sw.ElapsedMilliseconds);
     }
 
     public void UpdateCardInDevIncrement(int id_cardindev)
@@ -913,7 +910,7 @@ public class DB
         var sw = Stopwatch.StartNew();
         int rows = getcomand.ExecuteNonQuery();
         sw.Stop();
-        LogSqlResult("UpdateCardInDevIncrement", rows, sw.ElapsedMilliseconds);
+        LogSqlResult("913 UpdateCardInDevIncrement", rows, sw.ElapsedMilliseconds);
     }
 
     public int FixCardIdxOK(string idCard, int idDev, int uid)
@@ -938,7 +935,7 @@ public class DB
             var sw = Stopwatch.StartNew();
             int rowsUpdated = updateCommand.ExecuteNonQuery();
             sw.Stop();
-            LogSqlResult("FixCardIdxOK/update", rowsUpdated, sw.ElapsedMilliseconds);
+            LogSqlResult("938 FixCardIdxOK/update", rowsUpdated, sw.ElapsedMilliseconds);
 
             if (rowsUpdated == 0)
             {
@@ -955,14 +952,14 @@ public class DB
                 sw.Restart();
                 rowsUpdated = insertCommand.ExecuteNonQuery();
                 sw.Stop();
-                LogSqlResult("FixCardIdxOK/insert", rowsUpdated, sw.ElapsedMilliseconds);
+                LogSqlResult("955 FixCardIdxOK/insert", rowsUpdated, sw.ElapsedMilliseconds);
             }
 
             return rowsUpdated;
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error in FixCardIdxOK for card={IdCard} id_dev={IdDev}", idCard, idDev);
+            _logger?.LogError(ex, "962 Error in FixCardIdxOK for card={IdCard} id_dev={IdDev}", idCard, idDev);
             return 0;
         }
     }
@@ -984,7 +981,7 @@ public class DB
                 where d.id_dev=@idDev
                  ))";
 
-            _logger?.LogDebug("FixDeviceErr id_dev={idDev} messErr={messErr}", idDev, messErr);
+            _logger?.LogDebug("984 FixDeviceErr id_dev={idDev} messErr={messErr}", idDev, messErr);
 
             using var updateCommand = new FbCommand(updateSql, con);
             updateCommand.Parameters.AddWithValue("@messErr", messErr);
@@ -994,13 +991,13 @@ public class DB
             var sw = Stopwatch.StartNew();
             int rowsUpdated = updateCommand.ExecuteNonQuery();
             sw.Stop();
-            LogSqlResult("FixDeviceErr", rowsUpdated, sw.ElapsedMilliseconds);
+            LogSqlResult("994 FixDeviceErr", rowsUpdated, sw.ElapsedMilliseconds);
 
             return rowsUpdated;
         }
         catch (Exception ex)
         {
-            _logger?.LogError(ex, "Error in FixDeviceErr for id_dev={idDev}", idDev);
+            _logger?.LogError(ex, "1000 Error in FixDeviceErr for id_dev={idDev}", idDev);
             return 0;
         }
     }

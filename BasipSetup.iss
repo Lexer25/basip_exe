@@ -1,11 +1,11 @@
 [Setup]
 AppName=Basip Key Service
-AppVersion=2.0.5.1
+AppVersion=2.0.5.5
 AppPublisher=ООО "Артсек"
 DefaultDirName={commonpf}\Basip Key Service
 DefaultGroupName=Basip Key Service
 OutputDir=Output
-OutputBaseFilename=BasipKeyServiceSetup_v2.0.5.1
+OutputBaseFilename=BasipKeyServiceSetup_v2.0.5.5
 Compression=lzma2/max
 SolidCompression=yes
 PrivilegesRequired=admin
@@ -13,11 +13,11 @@ WizardStyle=modern
 DisableWelcomePage=no
 DisableDirPage=no
 DisableProgramGroupPage=no
-VersionInfoVersion=2.0.5.1
+VersionInfoVersion=2.0.5.5
 VersionInfoCompany=ООО "Артсек"
 VersionInfoDescription=Service for working with Bas-IP devices
 VersionInfoProductName=Basip Key Service
-VersionInfoProductVersion=2.0.5.1
+VersionInfoProductVersion=2.0.5.5
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -52,7 +52,7 @@ Name: "{group}\Удаление Basip Service"; Filename: "{uninstallexe}"; Comp
 [Run]
 ; Установка службы (только если выбран компонент service)
 Filename: "sc"; Parameters: "create ""Basip Key Service"" binPath= ""{app}\basipkeysservices.exe"" start= auto DisplayName= ""Basip Key Service"""; Flags: runhidden waituntilterminated; StatusMsg: "Установка службы Windows..."; Components: service
-Filename: "sc"; Parameters: "description ""Basip Key Service"" ""Service for working with Bas-IP devices. Version 2.0.5.1"""; Flags: runhidden waituntilterminated; Components: service
+Filename: "sc"; Parameters: "description ""Basip Key Service"" ""Service for working with Bas-IP devices. Version 2.0.5.5"""; Flags: runhidden waituntilterminated; Components: service
 Filename: "sc"; Parameters: "start ""Basip Key Service"""; Flags: runhidden waituntilterminated; StatusMsg: "Запуск службы..."; Components: service
 
 ; Создание папки для логов
@@ -111,7 +111,7 @@ begin
   if CurStep = ssPostInstall then
   begin
     MsgBox('Установка Basip Key Service завершена успешно!' + #13#10 + #13#10 + 
-           'Версия: 2.0.5.1' + #13#10 +
+           'Версия: 2.0.5.5' + #13#10 +
            'Исполняемый файл: basipkeysservices.exe' + #13#10 + #13#10 +
            'Служба "Basip Key Service" установлена и запущена.' + #13#10 +
            'Логи будут сохраняться в: {commonappdata}\Basip\ArtonitBasIpTools.log' + #13#10 +
