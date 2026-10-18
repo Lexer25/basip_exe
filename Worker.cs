@@ -286,166 +286,9 @@ namespace Basip
                 return;
             }
 
-            // Используем переданный dbForEvents вместо создания нового
-            try
-            {
-                // major уже разобран выше из того же поля api_version
-                int majorVersion = major;
-                logger.LogTrace($"288 id_dev={dev.id_dev} major api для обработки событий = {majorVersion}");
-
-                long lastTimestamp = dbForEvents.GetLastEventID(currentDeviceId);
-                // Если нет сохраненного timestamp, берем время 1 час назад
-                if (lastTimestamp == 0)
-                {
-                    lastTimestamp = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeMilliseconds();
-                    logger.LogTrace($"260 id_dev={dev.id_dev} No previous events found for device {currentDeviceId} IP: {dev.base_url}, using 1 hour ago: {DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss}");
-                }
-                else
-                {
-                    logger.LogTrace($"264 id_dev={dev.id_dev} Старт сбор событий IP: {dev.base_url} начиная с метки времени {DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss}");
-                }
-
-                // Получаем события НАЧИНАЯ С последнего timestamp (включительно)
-                var logsResponse = await dev.GetEvents(lastTimestamp, 50);
-                bool OkForClear = false;//Признак: количество событий мало. Это бывает только при выборе последнеий страницы, и события в журнале можно удалять.
-
-                if (logsResponse.StatusCode == HttpStatusCode.OK && !string.IsNullOrEmpty(logsResponse.Content))
-                {
-                    var logsData = JsonSerializer.Deserialize<Basip.LogsResponse>(logsResponse.Content);
-                    //текущее время.
-                    long currentTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-
-                    if (logsData?.list_items != null && logsData.list_items.Count > 0)//если есть события, то начинаю обработку
-                    {
-                        logger.LogTrace($"276 id_dev={dev.id_dev} Получено {logsData.list_items.Count} событий от device base_url= {dev.base_url}");
-
-                        //если количество событий logsData.list_items.Count меньше размера страницы, то после выборки журнала
-                        
-                        if (logsData.list_items.Count > 25) OkForClear = true;//для страховки берется не полный объем страницы, а половина.
-
-                        long maxTimestamp = lastTimestamp;
-                        int processedEventsCount = 0;
-                        
-                        // Обрабатываем все события НАЧИНАЯ С последнего timestamp
-                        foreach (var logItem in logsData.list_items)
-                        {
-                            var currentStr = DateTimeOffset.FromUnixTimeMilliseconds(currentTimestamp).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
-                            var logItemStr = DateTimeOffset.FromUnixTimeMilliseconds(logItem.timestamp).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
-                            var lastStr = DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
-
-                            logger.LogTrace(
-                                "319 id_dev={IdDev} параметры события и времена обработки currentTimestamp={currentTimestamp}, logItemTimestamp={logItemTimestamp}, lastTimestamp={lastTimestamp}",
-                                dev.id_dev, currentStr, logItemStr, lastStr);
-
-                            // Берем события с timestamp >= lastTimestamp
-                            if (logItem.timestamp >= lastTimestamp)
-                            {
-                                if (logItem.timestamp > maxTimestamp)
-                                {
-                                    if (logItem.timestamp > currentTimestamp)
-                                    {
-                                        //метка времени превышает текущее время
-                                        logger.LogCritical("336-0 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem, LogJson.Options));
-                                        processingLogger.LogInformation("336-1 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem, LogJson.Options));
-                                        continue; // <-- пропускаем аномальное событие, продолжаем обработку списка
-
-                                    }
-                                    else
-                                    {
-                                        maxTimestamp = logItem.timestamp;//собираю максимальную метку времени, т.к. нет гарантии, что события идут последовательно.
-                                    }
-                                }
-                                // Для отладки можно вывести полный JSON
-                                logger.LogTrace("293 id_dev={IdDev} IP: {BaseUrl} текст события LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem, LogJson.Options));
-                                await ProcessLogEvent(dbForEvents, dev, logItem, currentDeviceId, majorVersion);//записываю событий в базу данных СКУД
-                                processedEventsCount++;//счетчик: сколько событий записано
-                            }
-                            else
-                            {
-                                logger.LogTrace($"297 id_dev={dev.id_dev} Skipping old event with timestamp: {logItem.timestamp} {DateTimeOffset.FromUnixTimeMilliseconds(logItem.timestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss} (last: {lastTimestamp} {DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss})");
-                            }
-                        }
-                        logger.LogTrace($"300 id_dev={dev.id_dev} currentDeviceId = {currentDeviceId} maxTimestamp= {maxTimestamp} {DateTimeOffset.FromUnixTimeMilliseconds(maxTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss}");
-                        if (processedEventsCount > 0)
-                        {
-                            dbForEvents.SetLastEventID(currentDeviceId, maxTimestamp);//запись последней метки времени в базу данных. Дальше опрос начнется с этой метки
-                            logger.LogTrace($"304 id_dev={dev.id_dev} Обработано {processedEventsCount} событий, последняя метка времени to: {DateTimeOffset.FromUnixTimeMilliseconds(maxTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss}");//фиксирую в логе сколько записей было сделано для указанного id_dev={dev.id_dev}
-
-                            
-                        }
-                        else
-                        {
-                            logger.LogTrace($"326 id_dev={dev.id_dev} Нет новых события для IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}");
-                        }
-                    }
-                    else
-                    {
-                        logger.LogTrace($"331 id_dev={dev.id_dev} No events found in response for device {currentDeviceId} ");
-                    }
-
-                    //Раздел очистки журнала
-                    //в API 2.XX нет очистки журнала событий.
-                 /*   if (options.clear_log && OkForClear && majorVersion < 2)
-                    {
-                        var statusLog = await dev.ClearingLog(majorVersion);
-                        switch (statusLog.StatusCode)
-                        {
-                            case HttpStatusCode.OK:
-                                logger.LogTrace($"312 Successful attempt to clear the event log IP: {dev.base_url}, device {currentDeviceId},id_dev={dev.id_dev},  major api = {majorVersion}");
-                                break;
-                            default:
-                                logger.LogCritical($"315 Failed attempt to clear the event log IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}");
-                                break;
-                        }
-                    }
-                    else
-                    {
-                        logger.LogTrace($"321 id_dev={dev.id_dev} The event log has not been cleared IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}");
-                    }
-                 */
-
-                    //Раздел очистки журнала
-                    //в API 2.XX нет очистки журнала событий.
-
-                    // 1. Проверка: включена ли очистка журнала в настройках
-                    if (!options.clear_log)
-                    {
-                        logger.LogTrace($"414 id_dev={dev.id_dev} Журнал не очищать не надо. Причина: options.clear_log = {options.clear_log}");
-                    }
-                    // 2. Проверка: разрешена ли очистка (OkForClear)
-                    else if (!OkForClear)
-                    {
-                        logger.LogTrace($"419 id_dev={dev.id_dev} Журнал не очищать не надо. Причина: OkForClear = {OkForClear}");
-                    }
-                    // 3. Проверка: версия API (в 2.XX очистки нет)
-                    else if (majorVersion >= 2)
-                    {
-                        logger.LogTrace($"424 id_dev={dev.id_dev} Журнал не очищать не надо. Причина: majorVersion = {majorVersion} >= 2 (в API 2.XX нет очистки журнала)");
-                    }
-                    else
-                    {
-                        var statusLog = await dev.ClearingLog(majorVersion);
-                        switch (statusLog.StatusCode)
-                        {
-                            case HttpStatusCode.OK:
-                                logger.LogTrace($"432 Журнал событий очищен успешно IP: {dev.base_url}, device {currentDeviceId},id_dev={dev.id_dev},  major api = {majorVersion}, options.clear_log = {options.clear_log}, OkForClear = {OkForClear}");
-                                break;
-                            default:
-                                logger.LogCritical($"435 Ошибка при очистке журнала событий IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}, status = {statusLog.StatusCode}, options.clear_log = {options.clear_log}, OkForClear = {OkForClear}");
-                                break;
-                        }
-                    }
-
-                }
-                else
-                {
-                    logger.LogCritical($"400 id_dev={dev.id_dev} Failed to get events. Status: {logsResponse.StatusCode}");
-                }
-            }
-            catch (Exception ex)
-            {
-                logger.LogCritical($"341 id_dev={dev.id_dev} Error processing events for device {currentDeviceId} IP: {dev.base_url}: {ex.Message}");
-            }
+            // Сбор журнала событий вынесен в отдельный метод: разбор ответа панели
+            // (статус и тело) читается там сверху вниз, без общей вложенности в TaskGet.
+            await CollectEventsAsync(dbForEvents, dev, currentDeviceId, major);
 
             // ОБРАБОТКА КАРТ: создаем новый экземпляр DB для работы с картами
             DB dbForCards = new DB(options.db_config ?? string.Empty, logger);
@@ -473,6 +316,210 @@ namespace Basip
             {
                 logger.LogCritical($"368 id_dev={dev.id_dev} Error processing cards for device {currentDeviceId}: {ex.Message}");
             }
+        }
+
+        /// <summary>
+        /// Сбор журнала событий панели и запись событий в базу СКУД.
+        /// Ответ панели разбирается по двум независимым признакам:
+        ///   1) HTTP-статус — OK или ошибка (в теле ошибки панель обычно присылает причину отказа);
+        ///   2) тело ответа — пустое или нет (пустое тело разбирать нечего).
+        /// Журнал очищается только после успешного чтения и разбора ответа: иначе состояние
+        /// журнала на панели неизвестно, и очистка могла бы удалить непрочитанные события.
+        /// </summary>
+        private async Task CollectEventsAsync(DB db, Device dev, int deviceId, int majorVersion)
+        {
+            bool OkForClear = false;//очистка журнала событий запрещена.
+            try
+            {
+                logger.LogTrace($"333 id_dev={dev.id_dev} major api для обработки событий = {majorVersion}");
+
+                long lastTimestamp = db.GetLastEventID(deviceId);
+                // Если нет сохраненного timestamp, берем время 1 час назад
+                if (lastTimestamp == 0)
+                {
+                    lastTimestamp = DateTimeOffset.UtcNow.AddHours(-1).ToUnixTimeMilliseconds();
+                    logger.LogTrace($"260 id_dev={dev.id_dev} No previous events found for device {deviceId} IP: {dev.base_url}, using 1 hour ago: {DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss}");
+                }
+                else
+                {
+                    logger.LogTrace($"264 id_dev={dev.id_dev} Старт сбор событий IP: {dev.base_url} начиная с метки времени {DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss}");
+                }
+
+                // Получаем события НАЧИНАЯ С последнего timestamp (включительно)
+                RestResponse logsResponse = await dev.GetEvents(lastTimestamp, 50);
+
+                // Ситуация 1: статус ответа НЕ OK — журнал не прочитан.
+                if (logsResponse.StatusCode != HttpStatusCode.OK)
+                {
+                    if (string.IsNullOrEmpty(logsResponse.Content))
+                    {
+                        // 1а: тела нет — причину отказа узнать не из чего.
+                        logger.LogCritical($"400-1 id_dev={dev.id_dev} Не удалось получить события. IP: {dev.base_url}, device {deviceId}, HTTP status = {logsResponse.StatusCode}, тело ответа пустое");
+                    }
+                    else
+                    {
+                        // 1б: тело есть — панель обычно описывает в нём причину отказа.
+                        logger.LogCritical($"400-2 id_dev={dev.id_dev} Не удалось получить события. IP: {dev.base_url}, device {deviceId}, HTTP status = {logsResponse.StatusCode}, тело ответа: {TruncateForLog(logsResponse.Content)}");
+                    }
+                    return;
+                }
+
+                // Ситуация 2: статус OK, но тела нет — разбирать нечего.
+                if (string.IsNullOrEmpty(logsResponse.Content))
+                {
+                    logger.LogCritical($"400-3 id_dev={dev.id_dev} Панель вернула пустое тело ответа на запрос журнала. IP: {dev.base_url}, device {deviceId}, HTTP status = {logsResponse.StatusCode}");
+                    return;
+                }
+
+                // Ситуация 3: статус OK и тело есть — штатный разбор журнала.
+                Basip.LogsResponse? logsData = JsonSerializer.Deserialize<Basip.LogsResponse>(logsResponse.Content);
+                if (logsData == null)
+                {
+                    logger.LogCritical($"400-4 id_dev={dev.id_dev} Не удалось разобрать ответ панели в LogsResponse. IP: {dev.base_url}, device {deviceId}, тело ответа: {TruncateForLog(logsResponse.Content)}");
+                    return;
+                }
+
+                if (logsData.list_items == null || logsData.list_items.Count == 0)
+                {
+                    logger.LogTrace($"331 id_dev={dev.id_dev} Получено {logsData.list_items.Count} событий от device base_url= {dev.base_url}.");
+                   // OkForClear = true;
+
+                    //return;
+                }
+                else
+                {
+
+                    logger.LogTrace($"276 id_dev={dev.id_dev} Получено {logsData.list_items.Count} событий от device base_url= {dev.base_url}.");
+                    await StoreEventsAsync(db, dev, logsData.list_items, deviceId, majorVersion, lastTimestamp);
+                    logger.LogTrace($"276-1 id_dev={dev.id_dev} События сохранил. Можно и журнал событий очищать.");
+                    //события записал - очищаю журнал событий
+                    OkForClear = true;
+                    await TryClearEventLogAsync(dev, deviceId, majorVersion, OkForClear);
+
+                }
+               
+                 
+
+
+
+            }
+            catch (Exception ex)
+            {
+                logger.LogCritical($"341 id_dev={dev.id_dev} Error processing events for device {deviceId} IP: {dev.base_url}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Записывает события журнала в базу СКУД и сохраняет LASTEVENT устройства —
+        /// максимальную метку времени из обработанных событий, с неё продолжится опрос.
+        /// </summary>
+        private async Task StoreEventsAsync(DB db, Device dev, List<LogItem> items, int deviceId, int majorVersion, long lastTimestamp)
+        {
+            //текущее время.
+            long currentTimestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            long maxTimestamp = lastTimestamp;
+            int processedEventsCount = 0;
+
+            // Обрабатываем все события НАЧИНАЯ С последнего timestamp
+            foreach (LogItem logItem in items)
+            {
+                var currentStr = DateTimeOffset.FromUnixTimeMilliseconds(currentTimestamp).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+                var logItemStr = DateTimeOffset.FromUnixTimeMilliseconds(logItem.timestamp).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+                var lastStr = DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).LocalDateTime.ToString("yyyy-MM-dd HH:mm:ss");
+
+                logger.LogTrace(
+                    "319 id_dev={IdDev} параметры события и времена обработки currentTimestamp={currentTimestamp}, logItemTimestamp={logItemTimestamp}, lastTimestamp={lastTimestamp}",
+                    dev.id_dev, currentStr, logItemStr, lastStr);
+
+                // Берем события с timestamp >= lastTimestamp
+                if (logItem.timestamp >= lastTimestamp)
+                {
+                    if (logItem.timestamp > maxTimestamp)
+                    {
+                        if (logItem.timestamp > currentTimestamp)
+                        {
+                            //метка времени превышает текущее время
+                            logger.LogCritical("336-0 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem, LogJson.Options));
+                            processingLogger.LogInformation("336-1 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem, LogJson.Options));
+                            continue; // <-- пропускаем аномальное событие, продолжаем обработку списка
+                        }
+                        else
+                        {
+                            maxTimestamp = logItem.timestamp;//собираю максимальную метку времени, т.к. нет гарантии, что события идут последовательно.
+                        }
+                    }
+
+                    // Для отладки можно вывести полный JSON
+                    logger.LogTrace("293 id_dev={IdDev} IP: {BaseUrl} текст события LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem, LogJson.Options));
+                    await ProcessLogEvent(db, dev, logItem, deviceId, majorVersion);//записываю событий в базу данных СКУД
+                    processedEventsCount++;//счетчик: сколько событий записано
+                }
+                else
+                {
+                    logger.LogTrace($"297 id_dev={dev.id_dev} Skipping old event with timestamp: {logItem.timestamp} {DateTimeOffset.FromUnixTimeMilliseconds(logItem.timestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss} (last: {lastTimestamp} {DateTimeOffset.FromUnixTimeMilliseconds(lastTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss})");
+                }
+            }
+
+            logger.LogTrace($"300 id_dev={dev.id_dev} deviceId = {deviceId} maxTimestamp= {maxTimestamp} {DateTimeOffset.FromUnixTimeMilliseconds(maxTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss}");
+
+            if (processedEventsCount > 0)
+            {
+                db.SetLastEventID(deviceId, maxTimestamp);//запись последней метки времени в базу данных. Дальше опрос начнется с этой метки
+                logger.LogTrace($"304 id_dev={dev.id_dev} Обработано {processedEventsCount} событий, последняя метка времени to: {DateTimeOffset.FromUnixTimeMilliseconds(maxTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss}");//фиксирую в логе сколько записей было сделано для указанного id_dev={dev.id_dev}
+            }
+            else
+            {
+                logger.LogTrace($"326 id_dev={dev.id_dev} Нет новых события для IP: {dev.base_url}, device {deviceId}, major api = {majorVersion}");
+            }
+        }
+
+        /// <summary>
+        /// Очистка журнала событий панели. В API 2.x и выше очистки журнала нет, поэтому
+        /// запрос отправляется только панелям 1.x. Причина отказа от очистки всегда пишется в журнал.
+        /// </summary>
+        private async Task TryClearEventLogAsync(Device dev, int deviceId, int majorVersion, bool okForClear)
+        {
+            logger.LogTrace($"477 id_dev={dev.id_dev} Старт проверки очистки журнала TryClearEventLogAsync");
+            // 1. Проверка: включена ли очистка журнала в настройках
+            if (!options.clear_log)
+            {
+                logger.LogTrace($"414 id_dev={dev.id_dev} Журнал очищать не надо. Причина: options.clear_log = {options.clear_log}");
+                return;
+            }
+
+            // 2. Проверка: разрешена ли очистка (OkForClear)
+            if (!okForClear)
+            {
+                logger.LogTrace($"419 id_dev={dev.id_dev} Журнал очищать не надо. Причина: OkForClear = {okForClear}");
+                return;
+            }
+
+            // 3. Проверка: версия API (в 2.XX очистки нет)
+            if (majorVersion >= 2)
+            {
+                logger.LogTrace($"424 id_dev={dev.id_dev} Журнал очищать не надо. Причина: majorVersion = {majorVersion} >= 2 (в API 2.XX нет очистки журнала)");
+                return;
+            }
+
+            RestResponse statusLog = await dev.ClearingLog(majorVersion);
+            switch (statusLog.StatusCode)
+            {
+                case HttpStatusCode.OK:
+                    logger.LogTrace($"432 Журнал событий очищен успешно IP: {dev.base_url}, device {deviceId}, id_dev={dev.id_dev},  major api = {majorVersion}, options.clear_log = {options.clear_log}, OkForClear = {okForClear}");
+                    break;
+                default:
+                    logger.LogCritical($"435 Ошибка при очистке журнала событий IP: {dev.base_url}, device {deviceId}, major api = {majorVersion}, status = {statusLog.StatusCode}, options.clear_log = {options.clear_log}, OkForClear = {okForClear}");
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Обрезает тело ответа панели для записи в журнал, чтобы строка лога не разрасталась.
+        /// </summary>
+        private static string TruncateForLog(string? content, int maxLength = 500)
+        {
+            if (string.IsNullOrEmpty(content)) return string.Empty;
+            return content.Length <= maxLength ? content : content.Substring(0, maxLength) + "…";
         }
 
         private async Task ProcessCardWrite(DB db, Device dev, DataRow card, int deviceId)
