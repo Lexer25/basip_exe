@@ -294,21 +294,21 @@ namespace Basip
             // поэтому все записи ниже попадают и в консоль, и в файл журнала.
             LogFileLocation logFile = StartupConfiguration.ResolveLogFile();
 
-            logger.LogCritical("Служба не запущена: конфигурация приложения заполнена не полностью. Файл конфигурации: {ConfigurationFile}", StartupConfiguration.ConfigurationFilePath);
+            logger.LogCritical("297 Служба не запущена: конфигурация приложения заполнена не полностью. Файл конфигурации: {ConfigurationFile}", StartupConfiguration.ConfigurationFilePath);
 
             foreach (string error in failure.Errors)
             {
-                logger.LogCritical("{Error}", error);
+                logger.LogCritical("301 {Error}", error);
             }
 
             if (logFile.IsWritable)
             {
-                logger.LogCritical("Исправьте настройки в файле {ConfigurationFile} и запустите службу снова. Файл журнала: {LogFile}",
+                logger.LogCritical("306 Исправьте настройки в файле {ConfigurationFile} и запустите службу снова. Файл журнала: {LogFile}",
                     StartupConfiguration.ConfigurationFilePath, logFile.FilePath);
             }
             else
             {
-                logger.LogCritical("{Warning} Исправьте настройки в файле {ConfigurationFile} и запустите службу снова.",
+                logger.LogCritical("311 Исправьте настройки в файле {ConfigurationFile} и запустите службу снова.",
                     logFile.Warning, StartupConfiguration.ConfigurationFilePath);
             }
 

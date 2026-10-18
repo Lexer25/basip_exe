@@ -137,8 +137,7 @@ public class DB
     private void LogSqlResult(string context, int rowsAffected, long elapsedMs)
     {
         if (_logger == null) return;
-        _logger.LogDebug(
-            "SQL [{Context}] completed: rows={Rows}, elapsed={Elapsed}ms",
+        _logger.LogDebug("140 SQL [{Context}] completed: rows={Rows}, elapsed={Elapsed}ms",
             context, rowsAffected, elapsedMs);
     }
 

@@ -123,8 +123,8 @@ namespace Basip
             }
             catch (Exception e)
             {
-                logger.LogCritical("104 No connect database: " + options.db_config);
-                logger.LogCritical(e.ToString());
+                logger.LogCritical("104 No connect database: " + options.db_config + e.ToString());
+                
                 lifetime.StopApplication();
                 return;
             }
@@ -141,16 +141,15 @@ namespace Basip
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError("121 Something crash restart everything");
-                    logger.LogError(ex.ToString());
+                    logger.LogError("121 Something crash restart everything" + ex.ToString());
                     continue;
                 }
 
                 // Время следующего запуска указывается явно: раньше его приходилось
                 // считать по строке timeout в уме. Дата нужна на случай перехода через полночь.
                 DateTime nextRun = DateTime.Now.Add(timeout);
-                logger.LogInformation($@"126 timeout basip: {timeout}, следующий запуск: {nextRun:yyyy-MM-dd HH:mm:ss}");
-                processingLogger.LogInformation($@"126 timeout basip: {timeout}, следующий запуск: {nextRun:yyyy-MM-dd HH:mm:ss}");
+                logger.LogInformation($@"126-0 timeout basip: {timeout}, следующий запуск: {nextRun:yyyy-MM-dd HH:mm:ss}");
+                processingLogger.LogInformation($@"126-1 timeout basip: {timeout}, следующий запуск: {nextRun:yyyy-MM-dd HH:mm:ss}");
                 await Task.Delay(timeout, stoppingToken);
             }
 
@@ -308,6 +307,7 @@ namespace Basip
 
                 // Получаем события НАЧИНАЯ С последнего timestamp (включительно)
                 var logsResponse = await dev.GetEvents(lastTimestamp, 50);
+                bool OkForClear = false;//Признак: количество событий мало. Это бывает только при выборе последнеий страницы, и события в журнале можно удалять.
 
                 if (logsResponse.StatusCode == HttpStatusCode.OK && !string.IsNullOrEmpty(logsResponse.Content))
                 {
@@ -318,6 +318,10 @@ namespace Basip
                     if (logsData?.list_items != null && logsData.list_items.Count > 0)//если есть события, то начинаю обработку
                     {
                         logger.LogTrace($"276 id_dev={dev.id_dev} Получено {logsData.list_items.Count} событий от device base_url= {dev.base_url}");
+
+                        //если количество событий logsData.list_items.Count меньше размера страницы, то после выборки журнала
+                        
+                        if (logsData.list_items.Count > 25) OkForClear = true;//для страховки берется не полный объем страницы, а половина.
 
                         long maxTimestamp = lastTimestamp;
                         int processedEventsCount = 0;
@@ -341,8 +345,8 @@ namespace Basip
                                     if (logItem.timestamp > currentTimestamp)
                                     {
                                         //метка времени превышает текущее время
-                                        logger.LogInformation("336 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem, LogJson.Options));
-                                        processingLogger.LogInformation("336 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem, LogJson.Options));
+                                        logger.LogInformation("336-0 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem, LogJson.Options));
+                                        processingLogger.LogInformation("336-1 id_dev={IdDev} IP: {BaseUrl} время события превышает текущую дату LogItem: {LogItem}", dev.id_dev, dev.base_url, JsonSerializer.Serialize(logItem, LogJson.Options));
                                         continue; // <-- пропускаем аномальное событие, продолжаем обработку списка
 
                                     }
@@ -367,23 +371,7 @@ namespace Basip
                             dbForEvents.SetLastEventID(currentDeviceId, maxTimestamp);//запись последней метки времени в базу данных. Дальше опрос начнется с этой метки
                             logger.LogDebug($"304 id_dev={dev.id_dev} Обработано {processedEventsCount} событий, последняя метка времени to: {DateTimeOffset.FromUnixTimeMilliseconds(maxTimestamp).LocalDateTime:yyyy-MM-dd HH:mm:ss}");//фиксирую в логе сколько записей было сделано для указанного id_dev={dev.id_dev}
 
-                            if (options.clear_log)
-                            {
-                                var statusLog = await dev.ClearingLog(majorVersion);
-                                switch (statusLog.StatusCode)
-                                {
-                                    case HttpStatusCode.OK:
-                                        logger.LogDebug($"312 Successful attempt to clear the event log IP: {dev.base_url}, device {currentDeviceId},id_dev={dev.id_dev},  major api = {majorVersion}");
-                                        break;
-                                    default:
-                                        logger.LogWarning($"315 Failed attempt to clear the event log IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}");
-                                        break;
-                                }
-                            }
-                            else
-                            {
-                                logger.LogDebug($"321 id_dev={dev.id_dev} The event log has not been cleared IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}");
-                            }
+                            
                         }
                         else
                         {
@@ -394,10 +382,64 @@ namespace Basip
                     {
                         logger.LogDebug($"331 id_dev={dev.id_dev} No events found in response for device {currentDeviceId} ");
                     }
+
+                    //Раздел очистки журнала
+                    //в API 2.XX нет очистки журнала событий.
+                 /*   if (options.clear_log && OkForClear && majorVersion < 2)
+                    {
+                        var statusLog = await dev.ClearingLog(majorVersion);
+                        switch (statusLog.StatusCode)
+                        {
+                            case HttpStatusCode.OK:
+                                logger.LogDebug($"312 Successful attempt to clear the event log IP: {dev.base_url}, device {currentDeviceId},id_dev={dev.id_dev},  major api = {majorVersion}");
+                                break;
+                            default:
+                                logger.LogWarning($"315 Failed attempt to clear the event log IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}");
+                                break;
+                        }
+                    }
+                    else
+                    {
+                        logger.LogDebug($"321 id_dev={dev.id_dev} The event log has not been cleared IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}");
+                    }
+                 */
+
+                    //Раздел очистки журнала
+                    //в API 2.XX нет очистки журнала событий.
+
+                    // 1. Проверка: включена ли очистка журнала в настройках
+                    if (!options.clear_log)
+                    {
+                        logger.LogDebug($"414 id_dev={dev.id_dev} Журнал не очищать не надо. Причина: options.clear_log = {options.clear_log}");
+                    }
+                    // 2. Проверка: разрешена ли очистка (OkForClear)
+                    else if (!OkForClear)
+                    {
+                        logger.LogDebug($"419 id_dev={dev.id_dev} Журнал не очищать не надо. Причина: OkForClear = {OkForClear}");
+                    }
+                    // 3. Проверка: версия API (в 2.XX очистки нет)
+                    else if (majorVersion >= 2)
+                    {
+                        logger.LogDebug($"424 id_dev={dev.id_dev} Журнал не очищать не надо. Причина: majorVersion = {majorVersion} >= 2 (в API 2.XX нет очистки журнала)");
+                    }
+                    else
+                    {
+                        var statusLog = await dev.ClearingLog(majorVersion);
+                        switch (statusLog.StatusCode)
+                        {
+                            case HttpStatusCode.OK:
+                                logger.LogDebug($"432 Журнал событий очищен успешно IP: {dev.base_url}, device {currentDeviceId},id_dev={dev.id_dev},  major api = {majorVersion}, options.clear_log = {options.clear_log}, OkForClear = {OkForClear}");
+                                break;
+                            default:
+                                logger.LogWarning($"435 Ошибка при очистке журнала событий IP: {dev.base_url}, device {currentDeviceId}, major api = {majorVersion}, status = {statusLog.StatusCode}, options.clear_log = {options.clear_log}, OkForClear = {OkForClear}");
+                                break;
+                        }
+                    }
+
                 }
                 else
                 {
-                    logger.LogWarning($"336 id_dev={dev.id_dev} Failed to get events. Status: {logsResponse.StatusCode}");
+                    logger.LogWarning($"400 id_dev={dev.id_dev} Failed to get events. Status: {logsResponse.StatusCode}");
                 }
             }
             catch (Exception ex)
