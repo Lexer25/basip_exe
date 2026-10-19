@@ -216,7 +216,7 @@ public class DB
             cmd.ExecuteScalar();
 
             con.Close();
-            _logger?.LogCritical("219 Database connection successful");
+            _logger?.LogTrace("219 Database connection successful");
         }
         catch (FbException fbEx)
         {
@@ -494,11 +494,21 @@ public class DB
             foreach (var table in requiredTables)
             {
                 bool exists = TableExists(table);
-                logger.LogCritical($"497 Таблица '{table}': {(exists ? "НАЙДЕНА" : "ОТСУТСТВУЕТ")}");
+                //logger.LogCritical($"497 Таблица '{table}': {(exists ? "НАЙДЕНА" : "ОТСУТСТВУЕТ")}");
+                if( exists)
+                {
+                    logger.LogTrace($"497 Таблица '{table}':  НАЙДЕНА");
+                }
+                else
+                {
+                    logger.LogCritical($"497 Таблица '{table}':  ОТСУТСТВУЕТ");
+                }
+                
                 if (!exists)
                 {
                     missingTables.Add(table);
                 }
+                
             }
 
             if (missingTables.Any())

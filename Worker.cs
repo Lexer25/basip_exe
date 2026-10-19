@@ -234,6 +234,7 @@ namespace Basip
             {
                 auth = "Auth ERR";
                 logger.LogCritical($"211 id_dev={dev.id_dev} Device {dev.base_url} auth failed");
+                processingLogger.LogCritical($"211 id_dev={dev.id_dev} Device {dev.base_url} auth failed");
                 dbForEvents.FixDeviceErr("Auth ERR", currentDeviceId);
                 return;
             }
@@ -296,7 +297,15 @@ namespace Basip
             try
             {
                 DataRowCollection cardList = dbForCards.GetCardForLoad(currentDeviceId).Rows;
-                logger.LogCritical($"350 id_dev={dev.id_dev} Панель ID: {currentDeviceId}, IP: {dev.ip} - Card count: {cardList.Count}");
+                if (cardList.Count > 0)
+                {
+                    logger.LogCritical($"350 id_dev={dev.id_dev} Панель ID: {currentDeviceId}, IP: {dev.ip} - Card count: {cardList.Count}");
+                } else
+                {
+                    logger.LogTrace($"350 id_dev={dev.id_dev} Панель ID: {currentDeviceId}, IP: {dev.ip} - Card count: {cardList.Count}");
+
+                }
+                
 
                 foreach (DataRow card in cardList)
                 {
@@ -355,6 +364,7 @@ namespace Basip
                     {
                         // 1а: тела нет — причину отказа узнать не из чего.
                         logger.LogCritical($"400-1 id_dev={dev.id_dev} Не удалось получить события. IP: {dev.base_url}, device {deviceId}, HTTP status = {logsResponse.StatusCode}, тело ответа пустое");
+                        processingLogger.LogCritical($"400-1 id_dev={dev.id_dev} Не удалось получить события. IP: {dev.base_url}, device {deviceId}, HTTP status = {logsResponse.StatusCode}, тело ответа пустое");
                     }
                     else
                     {
@@ -820,19 +830,7 @@ namespace Basip
 
                     int insertedId = insertedEventTypeId ?? 0;
 
-                  /*  if (eventType != "successful_login_api_call")
-                    {
-                        if (cardNumber != null)
-                        {
-                            processingLogger.LogDebug($"703 +{note}, EventType={eventCode}, Card={cardNumber},  Id_Event={insertedId},  major api = {majorVersion}, id_dev={dev.id_dev}");
-                        }
-                        else
-                        {
-                            processingLogger.LogDebug($"711 +{note}, EventType={eventCode}, Id_Event={insertedId},  major api = {majorVersion}");
-                        }
-                    }
-                  */
-
+                 
                     if (insertedEventTypeId.HasValue)
                     {
                         if (cardNumber != null)
@@ -852,13 +850,13 @@ namespace Basip
                     {
                         if (cardNumber != null)
                         {
-                            processingLogger.LogDebug($"703 +{note},  Card={cardNumber},  major api = {majorVersion}, id_dev={dev.id_dev};  Id_Event_insert=Failed to save");
-                            logger.LogTrace($"703 +{note},  Card={cardNumber},  major api = {majorVersion}, id_dev={dev.id_dev};  Id_Event_insert=Failed to save");
+                            processingLogger.LogDebug($"851 +{note},  Card={cardNumber},  major api = {majorVersion}, id_dev={dev.id_dev};  Id_Event_insert=Failed to save");
+                            logger.LogTrace($"851 +{note},  Card={cardNumber},  major api = {majorVersion}, id_dev={dev.id_dev};  Id_Event_insert=Failed to save");
                         }
                         else
                         {
-                            processingLogger.LogDebug($"711 +{note},  major api = {majorVersion}; Id_Event_insert=Failed to save");
-                            logger.LogTrace($"711 +{note},  major api = {majorVersion}; Id_Event_insert=Failed to save");
+                            processingLogger.LogDebug($"856 +{note},  major api = {majorVersion}; Id_Event_insert=Failed to save");
+                            logger.LogTrace($"856 +{note},  major api = {majorVersion}; Id_Event_insert=Failed to save");
                         }
                         //processingLogger.LogError($"722 Failed to save event: Dev={deviceId}, EventType={eventCode}, major api = {majorVersion} ");
                     }
