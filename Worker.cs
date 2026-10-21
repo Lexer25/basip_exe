@@ -88,7 +88,7 @@ namespace Basip
             // Время первого запуска указывается явно: при run_now = false служба ждёт timestart.
             DateTime firstRun = DateTime.Now.Add(deltasleep);
             processingLogger.LogInformation(@$"32 старт Worker: {timestart} deltasleep: {deltasleep}, первый запуск: {firstRun:yyyy-MM-dd HH:mm:ss}");
-            processingLogger.LogInformation(@$"33 Служба записи и удаления карт и сбора события запущена.");
+            
 
             // Ожидание старта прерывается остановкой службы, иначе Task.Delay
             // задерживал бы штатное завершение на весь deltasleep.
@@ -100,8 +100,6 @@ namespace Basip
 
             try
             {
-                processingLogger.LogInformation($"84 Версия приложения basip: {version}");
-
                 // Создаем экземпляр DB с connection string
                 db = new DB(options.db_config ?? string.Empty, logger);
 
@@ -112,6 +110,7 @@ namespace Basip
                     // Штатная остановка хоста вместо Environment.Exit:
                     // Environment.Exit убивал процесс и не давал хосту корректно завершиться.
                     lifetime.StopApplication();
+                    processingLogger.LogCritical(@$"113 стоп error Worker");
                     return;
                 }
 
@@ -119,6 +118,7 @@ namespace Basip
 
                 // Получаем устройства один раз при старте
                 devices = db.GetDevice().Rows;
+                logger.LogInformation("71 Зарегистрировано панелей bas-ip: " + devices.Count + " шт.");
                 processingLogger.LogInformation("71 Зарегистрировано панелей bas-ip: " + devices.Count + " шт.");
             }
             catch (Exception e)
@@ -126,6 +126,8 @@ namespace Basip
                 logger.LogCritical("104 No connect database: " + options.db_config + e.ToString());
                 
                 lifetime.StopApplication();
+                logger.LogCritical(@$"128 стоп error Worker");
+                processingLogger.LogCritical(@$"128 стоп error Worker");
                 return;
             }
 
@@ -148,12 +150,14 @@ namespace Basip
                 // Время следующего запуска указывается явно: раньше его приходилось
                 // считать по строке timeout в уме. Дата нужна на случай перехода через полночь.
                 DateTime nextRun = DateTime.Now.Add(timeout);
+                logger.LogCritical($@"112 Старт normal итерации");
                 logger.LogCritical($@"126-0 timeout basip: {timeout}, следующий запуск: {nextRun:yyyy-MM-dd HH:mm:ss}");
                 processingLogger.LogInformation($@"126-1 timeout basip: {timeout}, следующий запуск: {nextRun:yyyy-MM-dd HH:mm:ss}");
                 await Task.Delay(timeout, stoppingToken);
             }
 
-            logger.LogCritical(@$"49 остановка Worker");
+            logger.LogCritical(@$"49 стоп normal Worker");
+            processingLogger.LogCritical(@$"49 стоп normal Worker");
         }
 
         private void run(DB db)

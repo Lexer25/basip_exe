@@ -68,12 +68,12 @@ try
         // не стартует из-за настроек. [sys] означает, что запись не связана с панелью.
         StartupConfiguration.Write(
             LogLevel.Information,
-            $"[sys] Версия программы: {ApplicationInfo.Version}. Исполняемый файл: {ApplicationInfo.ExecutablePath}",
+            $"[sys] 71 Версия программы: {ApplicationInfo.Version}. Исполняемый файл: {ApplicationInfo.ExecutablePath}",
             logFile);
 
         if (!string.IsNullOrWhiteSpace(logFile.Warning))
         {
-            StartupConfiguration.Write(LogLevel.Warning, $"[sys] {logFile.Warning}", logFile);
+            StartupConfiguration.Write(LogLevel.Warning, $"[sys] 76 {logFile.Warning}", logFile);
         }
 
         // Формат строки у обоих файловых журналов один и тот же: метка панели выводится
@@ -116,7 +116,7 @@ try
     // Уровень Critical выбран осознанно (как и для остановки): старт и остановка службы должны
     // быть видны при любом уровне журнала, а не только при Trace/Debug.
     programLogger.LogCritical(
-        "Старт программы (службы) basip. Версия: {Version}; режим: {Mode}; файл: {Executable}; время старта: {Started:yyyy-MM-dd HH:mm:ss}",
+        "119 Старт программы (службы) basip. Версия: {Version}; режим: {Mode}; файл: {Executable}; время старта: {Started:yyyy-MM-dd HH:mm:ss}",
         ApplicationInfo.Version,
         WindowsServiceHelpers.IsWindowsService() ? "служба Windows" : "консоль",
         ApplicationInfo.ExecutablePath,
@@ -131,7 +131,7 @@ try
     {
         TimeSpan uptime = DateTime.Now - programStartedAt;
         programLogger.LogCritical(
-            "Остановка программы (службы) basip. Время работы: {Uptime}; время остановки: {Stopped:yyyy-MM-dd HH:mm:ss}",
+            "134 Остановка программы (службы) basip. Время работы: {Uptime}; время остановки: {Stopped:yyyy-MM-dd HH:mm:ss}",
             $"{(int)uptime.TotalHours:00}:{uptime.Minutes:00}:{uptime.Seconds:00}",
             DateTime.Now);
     });
@@ -143,7 +143,7 @@ catch (Exception ex) when (ex is not OperationCanceledException)
     // Ошибка до или во время сборки хоста (например, повреждённый appsettings.json).
     // Хоста и его журнала ещё нет, поэтому запись делается аварийным способом.
     // Версия указывается здесь же: обычная запись с версией до этого места не дошла.
-    StartupConfiguration.WriteCritical($"[sys] Запуск приложения прерван (версия программы: {ApplicationInfo.Version}): {ex.Message}");
+    StartupConfiguration.WriteCritical($"[sys] 146 Запуск приложения прерван (версия программы: {ApplicationInfo.Version}): {ex.Message}");
     Environment.ExitCode = 1;
 }
 finally

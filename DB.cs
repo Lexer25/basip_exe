@@ -222,26 +222,18 @@ public class DB
         {
             string errorDetails = DecodeFirebirdError(fbEx, connectionString);
 
-            _logger?.LogError("================================================================================");
-            _logger?.LogError("226 DATABASE CONNECTION FAILED!");
-            _logger?.LogError("227 {ErrorDetails}", errorDetails);
-            _logger?.LogError("================================================================================");
-            _logger?.LogCritical("229 Connection string: {ConnectionString}", MaskConnectionString(connectionString));
-            _logger?.LogError("================================================================================");
+
+            _logger?.LogCritical("229 DATABASE CONNECTION FAILED! Connection string: {ConnectionString}, ErrorDetails {ErrorDetails}", MaskConnectionString(connectionString), errorDetails);
+
 
             throw new InvalidOperationException(
-                $"Cannot connect to database: {fbEx.Message}",
+                $"229 Cannot connect to database: {fbEx.Message}",
                 fbEx
             );
         }
         catch (Exception ex)
         {
-            _logger?.LogError("================================================================================");
-            _logger?.LogError("240 DATABASE CONNECTION FAILED!");
-            _logger?.LogError("241 Error: {Error}", ex.Message);
-            _logger?.LogError("================================================================================");
-            _logger?.LogError("243 Connection string: {ConnectionString}", MaskConnectionString(connectionString));
-            _logger?.LogError("================================================================================");
+            _logger?.LogError("243 DATABASE CONNECTION FAILED! Connection string: {ConnectionString}, Error: {Error}", MaskConnectionString(connectionString), ex.Message);
 
             throw new InvalidOperationException(
                 $"247 Cannot connect to database: {ex.Message}",
